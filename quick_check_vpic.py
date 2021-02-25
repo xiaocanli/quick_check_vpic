@@ -45,6 +45,7 @@ else:
     smooth_factor = 1
 dir_smooth_data = "data_smooth"
 tmin, tmax = 0, 125
+animation_tinterval = 100  # in msec
 nt = tmax - tmin + 1
 
 class MplCanvas(FigureCanvasQTAgg):
@@ -705,7 +706,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def start_animation(self):
         self.timer = QtCore.QTimer()
-        self.timer.setInterval(100)
+        self.timer.setInterval(animation_tinterval)
         self.timer.timeout.connect(self.tick_timer)
         self.timer.start()
         self.tframe_hSlider.setValue(tmin)
