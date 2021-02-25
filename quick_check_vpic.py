@@ -607,15 +607,14 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 elif vname[0] == 'u':
                     dset = group["rho"]
                     if self.normal == 'x':
-                        self.field_2d /= dset[self.plane_index, :, :]
+                        self.field_2d /= np.abs(dset[self.plane_index, :, :])
                     elif self.normal == 'y':
-                        self.field_2d /= dset[:, self.plane_index, :]
+                        self.field_2d /= np.abs(dset[:, self.plane_index, :])
                     else:
-                        self.field_2d /= dset[:, :, self.plane_index]
+                        self.field_2d /= np.abs(dset[:, :, self.plane_index])
                     self.field_2d /= pmass
                 else:
-                    dset_rho = group["rho"]
-                    dset_rho = group["rho"]
+                    dset = group["rho"]
                     if self.normal == 'x':
                         rho = dset[self.plane_index, :, :]
                     elif self.normal == 'y':
