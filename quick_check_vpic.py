@@ -4,6 +4,7 @@ Quick check of VPIC output
 """
 import math
 import sys
+import time
 
 import h5py
 import matplotlib as mpl
@@ -44,6 +45,7 @@ else:
     smooth_factor = 1
 dir_smooth_data = "data_smooth"
 tmin, tmax = 0, 125
+nt = tmax - tmin + 1
 
 class MplCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None, width=5, height=4, dpi=100, plot_type="Contour"):
@@ -248,6 +250,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # plot button
         self.plotButton.clicked.connect(self.update_plot)
+
+        # animation buttons
+        self.start_animateButton.clicked.connect(self.start_animation)
+        self.stop_animateButton.clicked.connect(self.stop_animation)
+        self.continue_animateButton.clicked.connect(self.continue_animation)
 
     def plottype_comboBox_change(self, value):
         self.plot_type = value
@@ -695,6 +702,26 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.canvas.ax1d.set_xlim(self.canvas.ax_main.get_xlim())
         # Trigger the canvas to update and redraw.
         self.canvas.draw()
+
+    def start_animation(self):
+        self.timer = QtCore.QTimer()
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self.tick_timer)
+        self.timer.start()
+        self.tframe_hSlider.setValue(tmin)
+
+    def tick_timer(self):
+        auto_update_old = self.auto_update
+        self.autoplot_checkBox.setChecked(True)
+        tframe = ((self.tframe - tmin + 1) % nt) + tmin
+        self.tframe_hSlider.setValue(tframe)
+        self.autoplot_checkBox.setChecked(auto_update_old)
+
+    def stop_animation(self):
+        self.timer.stop()
+
+    def continue_animation(self):
+        self.timer.start()
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
