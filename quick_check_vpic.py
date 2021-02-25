@@ -2,9 +2,10 @@
 """
 Quick check of VPIC output
 """
+import errno
 import math
+import os
 import sys
-import time
 
 import h5py
 import matplotlib as mpl
@@ -13,12 +14,12 @@ import numpy as np
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-from PyQt5 import QtCore, QtWidgets, uic
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout
+from PyQt5 import QtCore, QtWidgets
 
 from mainwindow import Ui_MainWindow
 
 mpl.use('Qt5Agg')
+
 
 def get_vpic_info():
     """Get information of the VPIC simulation
@@ -37,6 +38,7 @@ def get_vpic_info():
         vpic_info[line_splits[0].strip()] = float(tail[0])
     return vpic_info
 
+
 vpic_info = get_vpic_info()
 smoothed_data = True  # whether data is smoothed
 if smoothed_data:
@@ -47,6 +49,17 @@ dir_smooth_data = "data_smooth"
 tmin, tmax = 0, 125
 animation_tinterval = 100  # in msec
 nt = tmax - tmin + 1
+
+
+def mkdir_p(path):
+    try:
+        os.makedirs(path)
+    except OSError as exc:  # Python >2.5
+        if exc.errno == errno.EEXIST and os.path.isdir(path):
+            pass
+        else:
+            raise
+
 
 class MplCanvas(FigureCanvasQTAgg):
     def __init__(self, parent=None, width=5, height=4, dpi=100, plot_type="Contour"):
@@ -81,6 +94,7 @@ class MplCanvas(FigureCanvasQTAgg):
             self.ax_main = self.fig.add_subplot(spec[0, 0])
             self.ax1d = self.fig.add_subplot(spec[1, 0])
             self.ax_cbar = self.fig.add_subplot(spec[0, 1])
+
 
 class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def __init__(self, *args, obj=None, **kwargs):
@@ -252,10 +266,18 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # plot button
         self.plotButton.clicked.connect(self.update_plot)
 
+        # checkbox for saving JPEGs during animation
+        self.savejpg_checkBox.setChecked(False)
+        self.save_jpegs = False
+        self.savejpg_checkBox.stateChanged.connect(self.savejpg_checkBox_change)
+
         # animation buttons
         self.start_animateButton.clicked.connect(self.start_animation)
         self.stop_animateButton.clicked.connect(self.stop_animation)
         self.continue_animateButton.clicked.connect(self.continue_animation)
+        self.stop_animateButton.setDisabled(True)
+        self.continue_animateButton.setDisabled(True)
+        self.is_animation = False
 
     def plottype_comboBox_change(self, value):
         self.plot_type = value
@@ -267,6 +289,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.var_name = self.rawplot_comboBox.currentText()
         self.read_data(self.var_name, self.tindex)
         self.update_plot()
+
+    def savejpg_checkBox_change(self):
+        self.save_jpegs = not self.save_jpegs
 
     def autoplot_checkBox_change(self):
         self.auto_update = not self.auto_update
@@ -704,25 +729,42 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # Trigger the canvas to update and redraw.
         self.canvas.draw()
 
+        # save the figure
+        if self.save_jpegs and self.is_animation:
+            img_dir = "./img/" + self.var_name + "/"
+            mkdir_p(img_dir)
+            fname = img_dir + self.var_name + "_" + str(self.tframe) + ".jpg"
+            self.canvas.fig.savefig(fname)
+
     def start_animation(self):
         self.timer = QtCore.QTimer()
         self.timer.setInterval(animation_tinterval)
         self.timer.timeout.connect(self.tick_timer)
         self.timer.start()
         self.tframe_hSlider.setValue(tmin)
+        self.stop_animateButton.setDisabled(False)
+        self.continue_animateButton.setDisabled(False)
+        self.is_animation = True
+        self.auto_update_old = self.auto_update
+        self.autoplot_checkBox.setChecked(True)
 
     def tick_timer(self):
-        auto_update_old = self.auto_update
-        self.autoplot_checkBox.setChecked(True)
         tframe = ((self.tframe - tmin + 1) % nt) + tmin
+        if self.tframe == tmax:
+            self.savejpg_checkBox.setChecked(False)
         self.tframe_hSlider.setValue(tframe)
-        self.autoplot_checkBox.setChecked(auto_update_old)
 
     def stop_animation(self):
         self.timer.stop()
+        self.is_animation = False
+        self.autoplot_checkBox.setChecked(self.auto_update_old)
 
     def continue_animation(self):
         self.timer.start()
+        self.is_animation = True
+        self.auto_update_old = self.auto_update
+        self.autoplot_checkBox.setChecked(True)
+
 
 def main():
     app = QtWidgets.QApplication(sys.argv)

@@ -765,6 +765,24 @@
            <item>
             <layout class="QHBoxLayout" name="horizontalLayout_16">
              <item>
+              <widget class="QCheckBox" name="savejpg_checkBox">
+               <property name="font">
+                <font>
+                 <family>Helvetica</family>
+                 <pointsize>12</pointsize>
+                 <weight>50</weight>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="layoutDirection">
+                <enum>Qt::LeftToRight</enum>
+               </property>
+               <property name="text">
+                <string>SAVE JPEGs</string>
+               </property>
+              </widget>
+             </item>
+             <item>
               <widget class="QPushButton" name="start_animateButton">
                <property name="minimumSize">
                 <size>
@@ -1284,13 +1302,6 @@
      </item>
     </layout>
    </widget>
-   <zorder>layoutWidget</zorder>
-   <zorder>start_animateButton</zorder>
-   <zorder>animateButton_3</zorder>
-   <zorder>start_animateButton</zorder>
-   <zorder>stop_animateButton</zorder>
-   <zorder>continue_animateButton</zorder>
-   <zorder></zorder>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <widget class="QMenuBar" name="menuBar">
@@ -1309,19 +1320,7 @@
     <addaction name="actionClose_2"/>
     <addaction name="actionQuit"/>
    </widget>
-   <widget class="QMenu" name="menuEdit">
-    <property name="title">
-     <string>Edit</string>
-    </property>
-   </widget>
-   <widget class="QMenu" name="menuSettings">
-    <property name="title">
-     <string>Settings</string>
-    </property>
-   </widget>
    <addaction name="menuFile"/>
-   <addaction name="menuEdit"/>
-   <addaction name="menuSettings"/>
   </widget>
   <action name="actionClose_2">
    <property name="text">
