@@ -12,7 +12,7 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from matplotlib.figure import Figure
 from PyQt5 import QtCore, QtWidgets
 
@@ -40,13 +40,14 @@ def get_vpic_info():
 
 
 vpic_info = get_vpic_info()
-smoothed_data = True  # whether data is smoothed
+hdf5_fields = False  # whether data is in HDF5 format
+smoothed_data = False  # whether data is smoothed
 if smoothed_data:
     smooth_factor = 24  # smooth factor along each direction
 else:
     smooth_factor = 1
 dir_smooth_data = "data_smooth"
-tmin, tmax = 0, 125
+tmin, tmax = 0, 2
 animation_tinterval = 100  # in msec
 nt = tmax - tmin + 1
 
@@ -62,8 +63,10 @@ def mkdir_p(path):
 
 
 class MplCanvas(FigureCanvasQTAgg):
-    def __init__(self, parent=None, width=5, height=4, dpi=100, plot_type="Contour"):
-        self.fig = Figure(figsize=(width, height), constrained_layout=True, dpi=dpi)
+    def __init__(self, parent=None, width=5, height=4, dpi=100,
+                 plot_type="Contour"):
+        self.fig = Figure(figsize=(width, height), constrained_layout=True,
+                          dpi=dpi)
         self.create_axes(plot_type)
         super(MplCanvas, self).__init__(self.fig)
 
@@ -104,17 +107,39 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # simulation domain
         self.get_domain()
 
+        # check if the simulation is 2D
+        self.coords = ["x", "y", "z"]
+        self.normal = "x"  # normal direction
+        self.is_2d = False  # whether is a 2D simulation
+        for c in self.coords:
+            if self.vpic_domain["n" + c] == 1:
+                self.normal = c
+                self.is_2d = True
+
+        # the file type (HDF5 or gda)
+        if hdf5_fields:
+            self.filetype_comboBox.setCurrentText("HDF5")
+        else:
+            self.filetype_comboBox.setCurrentText("gda")
+            if smoothed_data:
+                self.gda_path = dir_smooth_data
+            else:
+                self.gda_path = "data/"
+
         # whether to automatically update the plot
         self.autoplot_checkBox.setChecked(False)
         self.auto_update = False
-        self.autoplot_checkBox.stateChanged.connect(self.autoplot_checkBox_change)
+        self.autoplot_checkBox.stateChanged.connect(
+                self.autoplot_checkBox_change)
 
         # plot type
-        self.plottype_comboBox.currentTextChanged.connect(self.plottype_comboBox_change)
+        self.plottype_comboBox.currentTextChanged.connect(
+                self.plottype_comboBox_change)
 
         # Raw plot variables
         self.raw_plot_variables()
-        self.rawplot_comboBox.currentTextChanged.connect(self.rawplot_comboBox_vchange)
+        self.rawplot_comboBox.currentTextChanged.connect(
+                self.rawplot_comboBox_vchange)
 
         # Create toolbar and canvas
         self.margin = 30
@@ -128,12 +153,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                                          self.width_max,
                                                          self.height_max))
         self.plot_vLayoutWidget.setObjectName("plot_vLayoutWidget")
-        self.plot_verticalLayout = QtWidgets.QVBoxLayout(self.plot_vLayoutWidget)
+        self.plot_verticalLayout = QtWidgets.QVBoxLayout(
+                self.plot_vLayoutWidget)
         self.plot_verticalLayout.setContentsMargins(0, 0, 0, 0)
         self.plot_verticalLayout.setObjectName("plot_verticalLayout")
         self.canvas = MplCanvas(self, width=8, height=8, dpi=100,
                                 plot_type=self.plottype_comboBox.currentText())
-        self.toolbar = NavigationToolbar(self.canvas, self)
+        self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self.plot_verticalLayout.addWidget(self.toolbar)
         self.plot_verticalLayout.addWidget(self.canvas)
 
@@ -147,6 +173,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.var_name = self.rawplot_comboBox.currentText()
         self.plot_type = self.plottype_comboBox.currentText()
         self.tframe = self.tframe_hSlider.value()
+        if "fields_interval" not in vpic_info:
+            vpic_info["fields_interval"], _ = QtWidgets.QInputDialog.getInt(
+                    self, "Get fields interval", "Fields interval:",
+                    100, 0, 10000000, 1)
         self.tindex = self.tframe * int(vpic_info["fields_interval"])
 
         # x-range
@@ -212,29 +242,33 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                            "zmax_box": self.zmax_SpinBox}
 
         # 1D slices
-        self.xslice_hScrollBar.valueChanged.connect(self.xslice_hScrollBar_vchange)
-        self.xslice_SpinBox.valueChanged.connect(self.xslice_SpinBox_vchange)
-        self.yslice_hScrollBar.valueChanged.connect(self.yslice_hScrollBar_vchange)
+        self.xslice_hScrollBar.valueChanged.connect(
+                self.xslice_hScrollBar_vchange)
+        self.xslice_SpinBox.valueChanged.connect(
+                self.xslice_SpinBox_vchange)
+        self.yslice_hScrollBar.valueChanged.connect(
+                self.yslice_hScrollBar_vchange)
         self.yslice_SpinBox.valueChanged.connect(self.yslice_SpinBox_vchange)
-        self.zslice_hScrollBar.valueChanged.connect(self.zslice_hScrollBar_vchange)
+        self.zslice_hScrollBar.valueChanged.connect(
+                self.zslice_hScrollBar_vchange)
         self.zslice_SpinBox.valueChanged.connect(self.zslice_SpinBox_vchange)
         self.xslice_hScrollBar.setMinimum(int(self.vpic_domain["xmin"]))
         self.xslice_hScrollBar.setMaximum(int(self.vpic_domain["xmax"]))
         self.xslice_SpinBox.setMinimum(self.vpic_domain["xmin"])
         self.xslice_SpinBox.setMaximum(self.vpic_domain["xmax"])
-        xmid = 0.5 * (self.vpic_domain["xmin"]+ self.vpic_domain["xmax"])
+        xmid = 0.5 * (self.vpic_domain["xmin"] + self.vpic_domain["xmax"])
         self.xslice_hScrollBar.setSliderPosition(int(xmid))
         self.yslice_hScrollBar.setMinimum(int(self.vpic_domain["ymin"]))
         self.yslice_hScrollBar.setMaximum(int(self.vpic_domain["ymax"]))
         self.yslice_SpinBox.setMinimum(self.vpic_domain["ymin"])
         self.yslice_SpinBox.setMaximum(self.vpic_domain["ymax"])
-        ymid = 0.5 * (self.vpic_domain["ymin"]+ self.vpic_domain["ymax"])
+        ymid = 0.5 * (self.vpic_domain["ymin"] + self.vpic_domain["ymax"])
         self.yslice_hScrollBar.setSliderPosition(int(ymid))
         self.zslice_hScrollBar.setMinimum(int(self.vpic_domain["zmin"]))
         self.zslice_hScrollBar.setMaximum(int(self.vpic_domain["zmax"]))
         self.zslice_SpinBox.setMinimum(self.vpic_domain["zmin"])
         self.zslice_SpinBox.setMaximum(self.vpic_domain["zmax"])
-        zmid = 0.5 * (self.vpic_domain["zmin"]+ self.vpic_domain["zmax"])
+        zmid = 0.5 * (self.vpic_domain["zmin"] + self.vpic_domain["zmax"])
         self.zslice_hScrollBar.setSliderPosition(int(zmid))
 
         # create a dictionary for the slices
@@ -246,16 +280,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                            "zslice_box": self.zslice_SpinBox}
 
         # 2D plane
-        self.coords = ["x", "y", "z"]
-        self.normal = "x"  # normal direction
-        self.is_2d = False  # whether is a 2D simulation
-        for c in self.coords:
-            if self.vpic_domain["n" + c] == 1:
-                self.normal = c
-                self.is_2d = True
-                self.plane_comboBox.setDisabled(True)
-        self.plane_comboBox.currentTextChanged.connect(self.plane_comboBox_vchange)
-        self.plane_hScrollBar.valueChanged.connect(self.plane_hScrollBar_vchange)
+        if self.is_2d:
+            self.plane_comboBox.setDisabled(True)
+        self.plane_comboBox.currentTextChanged.connect(
+                self.plane_comboBox_vchange)
+        self.plane_hScrollBar.valueChanged.connect(
+                self.plane_hScrollBar_vchange)
         self.plane_SpinBox.valueChanged.connect(self.plane_SpinBox_vchange)
         self.set_normal_plane()
         self.set_plane_index()
@@ -269,7 +299,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # checkbox for saving JPEGs during animation
         self.savejpg_checkBox.setChecked(False)
         self.save_jpegs = False
-        self.savejpg_checkBox.stateChanged.connect(self.savejpg_checkBox_change)
+        self.savejpg_checkBox.stateChanged.connect(
+                self.savejpg_checkBox_change)
 
         # animation buttons
         self.start_animateButton.clicked.connect(self.start_animation)
@@ -390,16 +421,21 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def set_normal_plane(self):
         self.hv = [c for c in self.coords if c != self.normal]  # in-plane
         self.plane_comboBox.setCurrentText(self.normal.upper() + "-Plane")
-        self.plane_hScrollBar.setMinimum(int(self.vpic_domain[self.normal + "min"]))
-        self.plane_hScrollBar.setMaximum(int(self.vpic_domain[self.normal + "max"]))
+        self.plane_hScrollBar.setMinimum(int(self.vpic_domain[self.normal +
+                                                              "min"]))
+        self.plane_hScrollBar.setMaximum(int(self.vpic_domain[self.normal +
+                                                              "max"]))
         self.plane_SpinBox.setMinimum(self.vpic_domain[self.normal + "min"])
         self.plane_SpinBox.setMaximum(self.vpic_domain[self.normal + "max"])
         mid = 0.5 * (self.vpic_domain[self.normal + "min"] +
                      self.vpic_domain[self.normal + "max"])
         self.plane_hScrollBar.setSliderPosition(int(mid))
-        self.plottype_comboBox.setItemText(1, "Contour+" + self.hv[0].upper() + "-Average")
-        self.plottype_comboBox.setItemText(2, "Contour+" + self.hv[0].upper() + "-Slice")
-        self.plottype_comboBox.setItemText(3, "Contour+" + self.hv[1].upper() + "-Slice")
+        self.plottype_comboBox.setItemText(1, "Contour+" +
+                                           self.hv[0].upper() + "-Average")
+        self.plottype_comboBox.setItemText(2, "Contour+" +
+                                           self.hv[0].upper() + "-Slice")
+        self.plottype_comboBox.setItemText(3, "Contour+" +
+                                           self.hv[1].upper() + "-Slice")
 
     def set_plane_index(self):
         plane_coord = self.plane_SpinBox.value()
@@ -415,24 +451,43 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def plane_SpinBox_vchange(self, value):
         self.plane_hScrollBar.setValue(int(value))
         self.set_plane_index()
-        self.read_data(self.var_name, self.tindex)
+        if hdf5_fields:
+            self.read_data(self.var_name, self.tindex)
+        else:
+            self.get_sliced_data()
         if self.auto_update:
             self.update_plot()
 
     def raw_plot_variables(self):
-        self.fields_list = ["cbx", "cby", "cbz", "absb", "ex", "ey", "ez"]
-        self.jlist = ["jx", "jy", "jz", "absj"]
-        self.ehydro_list = ["ne", "vex", "vey", "vez", "uex", "uey", "uez",
-                            "pexx", "pexy", "pexz", "peyx", "peyy", "peyz",
-                            "pezx", "pezy", "pezz"]
-        self.Hhydro_list = ["ni", "vix", "viy", "viz", "uix", "uiy", "uiz",
-                            "pixx", "pixy", "pixz", "piyx", "piyy", "piyz",
-                            "pizx", "pizy", "pizz"]
-        self.hydro_list = self.jlist + self.ehydro_list + self.Hhydro_list
+        if hdf5_fields:
+            self.fields_list = ["cbx", "cby", "cbz", "absb", "ex", "ey", "ez"]
+            self.jlist = ["jx", "jy", "jz", "absj"]
+            self.ehydro_list = ["ne", "vex", "vey", "vez", "uex", "uey", "uez",
+                                "pexx", "pexy", "pexz", "peyx", "peyy", "peyz",
+                                "pezx", "pezy", "pezz"]
+            self.Hhydro_list = ["ni", "vix", "viy", "viz", "uix", "uiy", "uiz",
+                                "pixx", "pixy", "pixz", "piyx", "piyy", "piyz",
+                                "pizx", "pizy", "pizz"]
+            self.hydro_list = self.jlist + self.ehydro_list + self.Hhydro_list
+            self.var_list = self.fields_list + self.hydro_list
+        else:
+            flist = [_ for _ in os.listdir(self.gda_path)
+                     if _.endswith(".gda")]
+            if len([name for name in flist if name[:2] == "bx"]) == 1:
+                # all frames are save in the same file
+                self.var_list = sorted([f[:-4] for f in flist])
+                self.single_gda = True  # all time frames are in the same file
+            else:
+                var_list = []
+                for f in flist:
+                    var_list.append(f.split("_")[0])
+                self.var_list = sorted(set(var_list))
+                self.single_gda = False
         _translate = QtCore.QCoreApplication.translate
-        for ivar, var in enumerate(self.fields_list + self.hydro_list):
+        for ivar, var in enumerate(self.var_list):
             self.rawplot_comboBox.addItem("")
-            self.rawplot_comboBox.setItemText(ivar, _translate("MainWindow", var))
+            self.rawplot_comboBox.setItemText(ivar, _translate("MainWindow",
+                                                               var))
 
     def get_domain(self):
         """Get VPIC simulation domain
@@ -469,6 +524,259 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                                 self.vpic_domain["zmax"] - hdz,
                                                 self.vpic_domain["nz"])
 
+    def get_sliced_data(self):
+        """Get a slice of 3D data
+        """
+        if self.normal == 'x':
+            self.field_2d = self.field_3d[:, :, self.plane_index].T
+        elif self.normal == 'y':
+            self.field_2d = self.field_3d[:, self.plane_index, :].T
+        else:
+            self.field_2d = self.field_3d[self.plane_index, :, :].T
+
+    def read_gda_file(self, vname, tindex):
+        """read fields or hydro in gda format
+
+        Args:
+            vname (string): variable name
+            tindex (int): time index
+        """
+        if self.is_2d:
+            nh = self.vpic_domain["n" + self.hv[0]]
+            nv = self.vpic_domain["n" + self.hv[1]]
+            if self.single_gda:
+                fname = self.gda_path + vname + ".gda"
+                fdata = np.fromfile(fname, dtype=np.float32, count=nh*nv,
+                                    offset=nh*nv*self.tframe*4)
+            else:
+                fname = self.gda_path + vname + "_" + str(self.tindex) + ".gda"
+                fdata = np.fromfile(fname, dtype=np.float32, count=-1)
+            self.field_2d = fdata.reshape([nv, nh]).T
+        else:
+            nx = self.vpic_domain["nx"]
+            ny = self.vpic_domain["ny"]
+            nz = self.vpic_domain["nz"]
+            ntot = nx * ny * nz
+            # Since slicing of gda file is incontinent, we read all the 3D
+            # data cube and take slices in the memory.
+            if self.single_gda:
+                fname = self.gda_path + vname + ".gda"
+                self.field_3d = np.fromfile(fname,
+                                            dtype=np.float32,
+                                            count=ntot,
+                                            offset=ntot*self.tframe*4).reshape(
+                                                    [nz, ny, nx])
+            else:
+                fname = self.gda_path + vname + "_" + str(self.tindex) + ".gda"
+                self.field_3d = np.fromfile(fname,
+                                            dtype=np.float32,
+                                            count=-1).reshape([nz, ny, nx])
+            self.get_sliced_data()
+
+    def read_fields(self, vname, tindex):
+        """read electric and magnetic fields in HDF5 format
+
+        Args:
+            vname (string): variable name
+            tindex (int): time index
+        """
+        if smoothed_data:
+            fname = ("./" + dir_smooth_data + "/fields_" +
+                     str(tindex) + ".h5")
+        else:
+            fdir = "./field_hdf5/T." + str(tindex) + "/"
+            fname = fdir + "fields_" + str(tindex) + ".h5"
+        with h5py.File(fname, 'r') as fh:
+            group = fh["Timestep_" + str(tindex)]
+            if vname == "absb":
+                bvec = {}
+                for var in ["cbx", "cby", "cbz"]:
+                    dset = group[var]
+                    if self.normal == 'x':
+                        bvec[var] = dset[self.plane_index, :, :]
+                    elif self.normal == 'y':
+                        bvec[var] = dset[:, self.plane_index, :]
+                    else:
+                        bvec[var] = dset[:, :, self.plane_index]
+                self.field_2d = np.sqrt(bvec["cbx"]**2 +
+                                        bvec["cby"]**2 +
+                                        bvec["cbz"]**2)
+            else:
+                dset = group[vname]
+                if self.normal == 'x':
+                    self.field_2d = dset[self.plane_index, :, :]
+                elif self.normal == 'y':
+                    self.field_2d = dset[:, self.plane_index, :]
+                else:
+                    self.field_2d = dset[:, :, self.plane_index]
+
+    def read_electron_current_density(self, vname, tindex):
+        """read electron current density
+
+        Args:
+            vname (string): variable name
+            tindex (int): time index
+        """
+        if smoothed_data:
+            fname = ("./" + dir_smooth_data + "/hydro_electron_" +
+                     str(tindex) + ".h5")
+        else:
+            fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+            fname = fdir + "hydro_electron_" + str(tindex) + ".h5"
+        with h5py.File(fname, 'r') as fh:
+            group = fh["Timestep_" + str(tindex)]
+            if vname == "absj":
+                j = {}
+                for var in ["jx", "jy", "jz"]:
+                    dset = group[var]
+                    if self.normal == 'x':
+                        j[var] = dset[self.plane_index, :, :]
+                    elif self.normal == 'y':
+                        j[var] = dset[:, self.plane_index, :]
+                    else:
+                        j[var] = dset[:, :, self.plane_index]
+            else:
+                dset = group[vname]
+                if self.normal == 'x':
+                    self.field_2d = dset[self.plane_index, :, :]
+                elif self.normal == 'y':
+                    self.field_2d = dset[:, self.plane_index, :]
+                else:
+                    self.field_2d = dset[:, :, self.plane_index]
+
+    def read_ion_current_density(self, vname, tindex):
+        """read electron current density
+
+        Args:
+            vname (string): variable name
+            tindex (int): time index
+        """
+        if smoothed_data:
+            fname = ("./" + dir_smooth_data + "/hydro_ion_" +
+                     str(tindex) + ".h5")
+        else:
+            fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+            fname = fdir + "hydro_ion_" + str(tindex) + ".h5"
+        with h5py.File(fname, 'r') as fh:
+            group = fh["Timestep_" + str(tindex)]
+            if vname == "absj":
+                j = {}
+                for var in ["jx", "jy", "jz"]:
+                    dset = group[var]
+                    if self.normal == 'x':
+                        j[var] += dset[self.plane_index, :, :]
+                    elif self.normal == 'y':
+                        j[var] += dset[:, self.plane_index, :]
+                    else:
+                        j[var] += dset[:, :, self.plane_index]
+                self.field_2d = np.sqrt(j["jx"]**2 +
+                                        j["jy"]**2 +
+                                        j["jz"]**2)
+            else:
+                dset = group[vname]
+                if self.normal == 'x':
+                    self.field_2d += dset[self.plane_index, :, :]
+                elif self.normal == 'y':
+                    self.field_2d += dset[:, self.plane_index, :]
+                else:
+                    self.field_2d += dset[:, :, self.plane_index]
+
+    def read_current_density(self, vname, tindex):
+        """read current density
+
+        Args:
+            vname (string): variable name
+            tindex (int): time index
+        """
+        self.read_electron_current_density(vname, tindex)
+        self.read_ion_current_density(vname, tindex)
+
+    def read_hydro(self, vname, tindex):
+        """Read hydro data from file
+
+        Args:
+            vname (string): variable name
+            tindex (int): time index
+        """
+        if vname in self.ehydro_list:
+            if smoothed_data:
+                fname = ("./" + dir_smooth_data + "/hydro_electron_" +
+                         str(tindex) + ".h5")
+            else:
+                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+                fname = fdir + "hydro_electron_" + str(tindex) + ".h5"
+            pmass = 1.0
+        else:
+            if smoothed_data:
+                fname = ("./" + dir_smooth_data + "/hydro_ion_" +
+                         str(tindex) + ".h5")
+            else:
+                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+                fname = fdir + "hydro_ion_" + str(tindex) + ".h5"
+            pmass = vpic_info["mi/me"]
+        with h5py.File(fname, 'r') as fh:
+            group = fh["Timestep_" + str(tindex)]
+            if vname[0] == 'n':
+                var = "rho"
+            elif vname[0] == 'v':
+                var = "j" + vname[-1]
+            elif vname[0] == 'u':
+                var = "p" + vname[-1]
+            else:
+                vtmp = "t" + vname[2:]
+                if vtmp in group:
+                    var = vtmp
+                else:
+                    var = "t" + vname[-1] + vname[-2]
+            dset = group[var]
+            if self.normal == 'x':
+                self.field_2d = dset[self.plane_index, :, :]
+            elif self.normal == 'y':
+                self.field_2d = dset[:, self.plane_index, :]
+            else:
+                self.field_2d = dset[:, :, self.plane_index]
+            if vname[0] == 'n':
+                self.field_2d = np.abs(self.field_2d)
+            elif vname[0] == 'v':
+                dset = group["rho"]
+                if self.normal == 'x':
+                    self.field_2d /= dset[self.plane_index, :, :]
+                elif self.normal == 'y':
+                    self.field_2d /= dset[:, self.plane_index, :]
+                else:
+                    self.field_2d /= dset[:, :, self.plane_index]
+            elif vname[0] == 'u':
+                dset = group["rho"]
+                if self.normal == 'x':
+                    self.field_2d /= np.abs(dset[self.plane_index, :, :])
+                elif self.normal == 'y':
+                    self.field_2d /= np.abs(dset[:, self.plane_index, :])
+                else:
+                    self.field_2d /= np.abs(dset[:, :, self.plane_index])
+                self.field_2d /= pmass
+            else:
+                dset = group["rho"]
+                if self.normal == 'x':
+                    rho = dset[self.plane_index, :, :]
+                elif self.normal == 'y':
+                    rho = dset[:, self.plane_index, :]
+                else:
+                    rho = dset[:, :, self.plane_index]
+                dset = group["j" + vname[-2]]
+                if self.normal == 'x':
+                    v = dset[self.plane_index, :, :] / rho
+                elif self.normal == 'y':
+                    v = dset[:, self.plane_index, :] / rho
+                else:
+                    v = dset[:, :, self.plane_index] / rho
+                dset = group["p" + vname[-1]]
+                if self.normal == 'x':
+                    self.field_2d -= v * dset[self.plane_index, :, :]
+                elif self.normal == 'y':
+                    self.field_2d -= v * dset[:, self.plane_index, :]
+                else:
+                    self.field_2d -= v * dset[:, :, self.plane_index]
+
     def read_data(self, vname, tindex):
         """Read data from file
 
@@ -476,165 +784,15 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             vname (string): variable name
             tindex (int): time index
         """
-        if vname in self.fields_list:  # electric and magnetic fields
-            if smoothed_data:
-                fname = "./" + dir_smooth_data + "/fields_" + str(tindex) + ".h5"
-            else:
-                fdir = "./field_hdf5/T." + str(tindex) + "/"
-                fname = fdir + "fields_" + str(tindex) + ".h5"
-            with h5py.File(fname, 'r') as fh:
-                group = fh["Timestep_" + str(tindex)]
-                if vname == "absb":
-                    bvec = {}
-                    for var in ["cbx", "cby", "cbz"]:
-                        dset = group[var]
-                        if self.normal == 'x':
-                            bvec[var] = dset[self.plane_index, :, :]
-                        elif self.normal == 'y':
-                            bvec[var] = dset[:, self.plane_index, :]
-                        else:
-                            bvec[var] = dset[:, :, self.plane_index]
-                    self.field_2d = np.sqrt(bvec["cbx"]**2 +
-                                            bvec["cby"]**2 +
-                                            bvec["cbz"]**2)
-                else:
-                    dset = group[vname]
-                    if self.normal == 'x':
-                        self.field_2d = dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
-                        self.field_2d = dset[:, self.plane_index, :]
-                    else:
-                        self.field_2d = dset[:, :, self.plane_index]
-        elif vname in self.jlist:  # current density
-            # electron
-            if smoothed_data:
-                fname = "./" + dir_smooth_data + "/hydro_electron_" + str(tindex) + ".h5"
-            else:
-                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
-                fname = fdir + "hydro_electron_" + str(tindex) + ".h5"
-            with h5py.File(fname, 'r') as fh:
-                group = fh["Timestep_" + str(tindex)]
-                if vname == "absj":
-                    j = {}
-                    for var in ["jx", "jy", "jz"]:
-                        dset = group[var]
-                        if self.normal == 'x':
-                            j[var] = dset[self.plane_index, :, :]
-                        elif self.normal == 'y':
-                            j[var] = dset[:, self.plane_index, :]
-                        else:
-                            j[var] = dset[:, :, self.plane_index]
-                else:
-                    dset = group[vname]
-                    if self.normal == 'x':
-                        self.field_2d = dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
-                        self.field_2d = dset[:, self.plane_index, :]
-                    else:
-                        self.field_2d = dset[:, :, self.plane_index]
-            # ion
-            if smoothed_data:
-                fname = "./" + dir_smooth_data + "/hydro_ion_" + str(tindex) + ".h5"
-            else:
-                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
-                fname = fdir + "hydro_ion_" + str(tindex) + ".h5"
-            with h5py.File(fname, 'r') as fh:
-                group = fh["Timestep_" + str(tindex)]
-                if vname == "absj":
-                    for var in ["jx", "jy", "jz"]:
-                        dset = group[var]
-                        if self.normal == 'x':
-                            j[var] += dset[self.plane_index, :, :]
-                        elif self.normal == 'y':
-                            j[var] += dset[:, self.plane_index, :]
-                        else:
-                            j[var] += dset[:, :, self.plane_index]
-                    self.field_2d = np.sqrt(j["jx"]**2 + j["jy"]**2 + j["jz"]**2)
-                else:
-                    dset = group[vname]
-                    if self.normal == 'x':
-                        self.field_2d += dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
-                        self.field_2d += dset[:, self.plane_index, :]
-                    else:
-                        self.field_2d += dset[:, :, self.plane_index]
-        else:  # density, velocity, momentum, pressure tensor
-            if vname in self.ehydro_list:
-                if smoothed_data:
-                    fname = "./" + dir_smooth_data + "/hydro_electron_" + str(tindex) + ".h5"
-                else:
-                    fdir = "./hydro_hdf5/T." + str(tindex) + "/"
-                    fname = fdir + "hydro_electron_" + str(tindex) + ".h5"
-                pmass = 1.0
-            else:
-                if smoothed_data:
-                    fname = "./" + dir_smooth_data + "/hydro_ion_" + str(tindex) + ".h5"
-                else:
-                    fdir = "./hydro_hdf5/T." + str(tindex) + "/"
-                    fname = fdir + "hydro_ion_" + str(tindex) + ".h5"
-                pmass = vpic_info["mi/me"]
-            with h5py.File(fname, 'r') as fh:
-                group = fh["Timestep_" + str(tindex)]
-                if vname[0] == 'n':
-                    var = "rho"
-                elif vname[0] == 'v':
-                    var = "j" + vname[-1]
-                elif vname[0] == 'u':
-                    var = "p" + vname[-1]
-                else:
-                    vtmp = "t" + vname[2:]
-                    if vtmp in group:
-                        var = vtmp
-                    else:
-                        var = "t" + vname[-1] + vname[-2]
-                dset = group[var]
-                if self.normal == 'x':
-                    self.field_2d = dset[self.plane_index, :, :]
-                elif self.normal == 'y':
-                    self.field_2d = dset[:, self.plane_index, :]
-                else:
-                    self.field_2d = dset[:, :, self.plane_index]
-                if vname[0] == 'n':
-                    self.field_2d = np.abs(self.field_2d)
-                elif vname[0] == 'v':
-                    dset = group["rho"]
-                    if self.normal == 'x':
-                        self.field_2d /= dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
-                        self.field_2d /= dset[:, self.plane_index, :]
-                    else:
-                        self.field_2d /= dset[:, :, self.plane_index]
-                elif vname[0] == 'u':
-                    dset = group["rho"]
-                    if self.normal == 'x':
-                        self.field_2d /= np.abs(dset[self.plane_index, :, :])
-                    elif self.normal == 'y':
-                        self.field_2d /= np.abs(dset[:, self.plane_index, :])
-                    else:
-                        self.field_2d /= np.abs(dset[:, :, self.plane_index])
-                    self.field_2d /= pmass
-                else:
-                    dset = group["rho"]
-                    if self.normal == 'x':
-                        rho = dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
-                        rho = dset[:, self.plane_index, :]
-                    else:
-                        rho = dset[:, :, self.plane_index]
-                    dset = group["j" + vname[-2]]
-                    if self.normal == 'x':
-                        v = dset[self.plane_index, :, :] / rho
-                    elif self.normal == 'y':
-                        v = dset[:, self.plane_index, :] / rho
-                    else:
-                        v = dset[:, :, self.plane_index] / rho
-                    dset = group["p" + vname[-1]]
-                    if self.normal == 'x':
-                        self.field_2d -= v * dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
-                        self.field_2d -= v * dset[:, self.plane_index, :]
-                    else:
-                        self.field_2d -= v * dset[:, :, self.plane_index]
+        if hdf5_fields:
+            if vname in self.fields_list:  # electric and magnetic fields
+                self.read_fields(vname, tindex)
+            elif vname in self.jlist:  # current density
+                self.read_current_density(vname, tindex)
+            else:  # density, velocity, momentum, pressure tensor
+                self.read_hydro(vname, tindex)
+        else:
+            self.read_gda_file(vname, tindex)
 
     def update_plot(self):
         if np.any(self.field_2d < 0) and np.any(self.field_2d > 0):
@@ -667,7 +825,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if ("Contour+" + self.hv[0].upper()) in self.plot_type:
             lhp *= 1.25
             orientation = "horizontal"
-        elif self.plot_type == "Contour+" +self.hv[1].upper() + "-Slice":
+        elif self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
             lvp *= 1.25
         denp = max(lhp/self.width_max, lvp/self.height_max)
         canvas_h = int(lhp / denp)
