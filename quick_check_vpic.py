@@ -40,14 +40,14 @@ def get_vpic_info():
 
 
 vpic_info = get_vpic_info()
-hdf5_fields = False  # whether data is in HDF5 format
-smoothed_data = False  # whether data is smoothed
+hdf5_fields = True  # whether data is in HDF5 format
+smoothed_data = True  # whether data is smoothed
 if smoothed_data:
     smooth_factor = 24  # smooth factor along each direction
 else:
     smooth_factor = 1
 dir_smooth_data = "data_smooth"
-tmin, tmax = 0, 25
+tmin, tmax = 0, 125
 animation_tinterval = 100  # in msec
 nt = tmax - tmin + 1
 
@@ -85,8 +85,10 @@ class MplCanvas(FigureCanvasQTAgg):
             spec = self.fig.add_gridspec(nrows=1, ncols=2, width_ratios=widths)
             self.ax_main = self.fig.add_subplot(spec[0, 0])
             self.ax_cbar = self.fig.add_subplot(spec[0, 1])
-        elif plot_type in ["Contour+" + axes_h + "-Average",
-                           "Contour+" + axes_h + "-Slice"]:
+        elif plot_type in [
+                "Contour+" + axes_h + "-Average",
+                "Contour+" + axes_h + "-Slice"
+        ]:
             widths = [4, 1]
             heights = [4.8, 0.2]
             spec = self.fig.add_gridspec(nrows=2,
@@ -584,8 +586,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                                 offset=ntot * self.tframe *
                                                 4).reshape([nz, ny, nx])
                 else:
-                    fname = self.gda_path + vname + "_" + str(self.tindex) + ".gda"
-                    self.field_3d = np.fromfile(fname, dtype=np.float32,
+                    fname = self.gda_path + vname + "_" + str(
+                        self.tindex) + ".gda"
+                    self.field_3d = np.fromfile(fname,
+                                                dtype=np.float32,
                                                 count=-1).reshape([nz, ny, nx])
             self.tframe_loaded = self.tframe
             self.var_loaded = vname
@@ -631,16 +635,17 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 else:
                     self.field_2d = dset[:, :, self.plane_index]
 
-    def read_electron_current_density(self, vname, tindex):
-        """read electron current density
+    def read_current_density(self, vname, tindex):
+        """read current density
 
         Args:
             vname (string): variable name
             tindex (int): time index
         """
+        # Electron
         if smoothed_data:
-            fname = ("./" + dir_smooth_data + "/hydro_electron_" +
-                     str(tindex) + ".h5")
+            fname = ("./" + dir_smooth_data + "/hydro_ion_" + str(tindex) +
+                     ".h5")
         else:
             fdir = "./hydro_hdf5/T." + str(tindex) + "/"
             fname = fdir + "hydro_electron_" + str(tindex) + ".h5"
@@ -656,6 +661,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         j[var] = dset[:, self.plane_index, :]
                     else:
                         j[var] = dset[:, :, self.plane_index]
+                self.field_2d = np.sqrt(j["jx"]**2 + j["jy"]**2 + j["jz"]**2)
             else:
                 dset = group[vname]
                 if self.normal == 'x':
@@ -665,13 +671,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 else:
                     self.field_2d = dset[:, :, self.plane_index]
 
-    def read_ion_current_density(self, vname, tindex):
-        """read electron current density
-
-        Args:
-            vname (string): variable name
-            tindex (int): time index
-        """
+        # Ion
         if smoothed_data:
             fname = ("./" + dir_smooth_data + "/hydro_ion_" + str(tindex) +
                      ".h5")
@@ -681,7 +681,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         with h5py.File(fname, 'r') as fh:
             group = fh["Timestep_" + str(tindex)]
             if vname == "absj":
-                j = {}
                 for var in ["jx", "jy", "jz"]:
                     dset = group[var]
                     if self.normal == 'x':
@@ -699,16 +698,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     self.field_2d += dset[:, self.plane_index, :]
                 else:
                     self.field_2d += dset[:, :, self.plane_index]
-
-    def read_current_density(self, vname, tindex):
-        """read current density
-
-        Args:
-            vname (string): variable name
-            tindex (int): time index
-        """
-        self.read_electron_current_density(vname, tindex)
-        self.read_ion_current_density(vname, tindex)
 
     def read_hydro(self, vname, tindex):
         """Read hydro data from file
