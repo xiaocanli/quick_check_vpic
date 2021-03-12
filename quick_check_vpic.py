@@ -47,7 +47,7 @@ if smoothed_data:
 else:
     smooth_factor = 1
 dir_smooth_data = "data_smooth"
-tmin, tmax = 0, 2
+tmin, tmax = 0, 25
 animation_tinterval = 100  # in msec
 nt = tmax - tmin + 1
 
@@ -63,26 +63,34 @@ def mkdir_p(path):
 
 
 class MplCanvas(FigureCanvasQTAgg):
-    def __init__(self, parent=None, width=5, height=4, dpi=100,
+    def __init__(self,
+                 parent=None,
+                 width=5,
+                 height=4,
+                 dpi=100,
+                 axes_h="X",
                  plot_type="Contour"):
-        self.fig = Figure(figsize=(width, height), constrained_layout=True,
+        self.fig = Figure(figsize=(width, height),
+                          constrained_layout=True,
                           dpi=dpi)
-        self.create_axes(plot_type)
+        self.create_axes(axes_h, plot_type)
         super(MplCanvas, self).__init__(self.fig)
 
-    def update_axes(self, plot_type="Contour"):
-        self.create_axes(plot_type)
+    def update_axes(self, axes_h="X", plot_type="Contour"):
+        self.create_axes(axes_h, plot_type)
 
-    def create_axes(self, plot_type="Contour"):
+    def create_axes(self, axes_h="X", plot_type="Contour"):
         if plot_type == "Contour":
             widths = [4.8, 0.2]
             spec = self.fig.add_gridspec(nrows=1, ncols=2, width_ratios=widths)
             self.ax_main = self.fig.add_subplot(spec[0, 0])
             self.ax_cbar = self.fig.add_subplot(spec[0, 1])
-        elif plot_type in ["Contour+X-Average", "Contour+X-Slice"]:
+        elif plot_type in ["Contour+" + axes_h + "-Average",
+                           "Contour+" + axes_h + "-Slice"]:
             widths = [4, 1]
             heights = [4.8, 0.2]
-            spec = self.fig.add_gridspec(nrows=2, ncols=2,
+            spec = self.fig.add_gridspec(nrows=2,
+                                         ncols=2,
                                          width_ratios=widths,
                                          height_ratios=heights)
             self.ax_main = self.fig.add_subplot(spec[0, 0])
@@ -91,7 +99,8 @@ class MplCanvas(FigureCanvasQTAgg):
         else:
             widths = [4.8, 0.2]
             heights = [4, 1]
-            spec = self.fig.add_gridspec(nrows=2, ncols=2,
+            spec = self.fig.add_gridspec(nrows=2,
+                                         ncols=2,
                                          width_ratios=widths,
                                          height_ratios=heights)
             self.ax_main = self.fig.add_subplot(spec[0, 0])
@@ -109,12 +118,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # check if the simulation is 2D
         self.coords = ["x", "y", "z"]
-        self.normal = "x"  # normal direction
+        self.normal = "y"  # normal direction
         self.is_2d = False  # whether is a 2D simulation
         for c in self.coords:
             if self.vpic_domain["n" + c] == 1:
                 self.normal = c
                 self.is_2d = True
+        self.hv = [c for c in self.coords if c != self.normal]  # in-plane
 
         # the file type (HDF5 or gda)
         if hdf5_fields:
@@ -125,21 +135,23 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 self.gda_path = dir_smooth_data
             else:
                 self.gda_path = "data/"
+            self.tframe_loaded = -1
+            self.var_loaded = "random_var"
 
         # whether to automatically update the plot
         self.autoplot_checkBox.setChecked(False)
         self.auto_update = False
         self.autoplot_checkBox.stateChanged.connect(
-                self.autoplot_checkBox_change)
+            self.autoplot_checkBox_change)
 
         # plot type
         self.plottype_comboBox.currentTextChanged.connect(
-                self.plottype_comboBox_change)
+            self.plottype_comboBox_change)
 
         # Raw plot variables
         self.raw_plot_variables()
         self.rawplot_comboBox.currentTextChanged.connect(
-                self.rawplot_comboBox_vchange)
+            self.rawplot_comboBox_vchange)
 
         # Create toolbar and canvas
         self.margin = 30
@@ -148,16 +160,19 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.width_max = self.width() - 2 * self.margin
         self.height_max = self.height() - 2 * self.margin - self.top
         self.plot_vLayoutWidget = QtWidgets.QWidget(self.centralwidget)
-        self.plot_vLayoutWidget.setGeometry(QtCore.QRect(self.margin,
-                                                         self.top,
-                                                         self.width_max,
-                                                         self.height_max))
+        self.plot_vLayoutWidget.setGeometry(
+            QtCore.QRect(self.margin, self.top, self.width_max,
+                         self.height_max))
         self.plot_vLayoutWidget.setObjectName("plot_vLayoutWidget")
         self.plot_verticalLayout = QtWidgets.QVBoxLayout(
-                self.plot_vLayoutWidget)
+            self.plot_vLayoutWidget)
         self.plot_verticalLayout.setContentsMargins(0, 0, 0, 0)
         self.plot_verticalLayout.setObjectName("plot_verticalLayout")
-        self.canvas = MplCanvas(self, width=8, height=8, dpi=100,
+        self.canvas = MplCanvas(self,
+                                width=8,
+                                height=8,
+                                dpi=100,
+                                axes_h="X",
                                 plot_type=self.plottype_comboBox.currentText())
         self.toolbar = NavigationToolbar2QT(self.canvas, self)
         self.plot_verticalLayout.addWidget(self.toolbar)
@@ -175,8 +190,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.tframe = self.tframe_hSlider.value()
         if "fields_interval" not in vpic_info:
             vpic_info["fields_interval"], _ = QtWidgets.QInputDialog.getInt(
-                    self, "Get fields interval", "Fields interval:",
-                    100, 0, 10000000, 1)
+                self, "Get fields interval", "Fields interval:", 100, 0,
+                10000000, 1)
         self.tindex = self.tframe * int(vpic_info["fields_interval"])
 
         # x-range
@@ -228,29 +243,30 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.zmax_hScrollBar.setSliderPosition(self.zmax_hScrollBar.maximum())
 
         # create a dictionary for the ranges
-        self.range_dist = {"xmin_bar": self.xmin_hScrollBar,
-                           "xmin_box": self.xmin_SpinBox,
-                           "ymin_bar": self.ymin_hScrollBar,
-                           "ymin_box": self.ymin_SpinBox,
-                           "zmin_bar": self.zmin_hScrollBar,
-                           "zmin_box": self.zmin_SpinBox,
-                           "xmax_bar": self.xmax_hScrollBar,
-                           "xmax_box": self.xmax_SpinBox,
-                           "ymax_bar": self.ymax_hScrollBar,
-                           "ymax_box": self.ymax_SpinBox,
-                           "zmax_bar": self.zmax_hScrollBar,
-                           "zmax_box": self.zmax_SpinBox}
+        self.range_dist = {
+            "xmin_bar": self.xmin_hScrollBar,
+            "xmin_box": self.xmin_SpinBox,
+            "ymin_bar": self.ymin_hScrollBar,
+            "ymin_box": self.ymin_SpinBox,
+            "zmin_bar": self.zmin_hScrollBar,
+            "zmin_box": self.zmin_SpinBox,
+            "xmax_bar": self.xmax_hScrollBar,
+            "xmax_box": self.xmax_SpinBox,
+            "ymax_bar": self.ymax_hScrollBar,
+            "ymax_box": self.ymax_SpinBox,
+            "zmax_bar": self.zmax_hScrollBar,
+            "zmax_box": self.zmax_SpinBox
+        }
 
         # 1D slices
         self.xslice_hScrollBar.valueChanged.connect(
-                self.xslice_hScrollBar_vchange)
-        self.xslice_SpinBox.valueChanged.connect(
-                self.xslice_SpinBox_vchange)
+            self.xslice_hScrollBar_vchange)
+        self.xslice_SpinBox.valueChanged.connect(self.xslice_SpinBox_vchange)
         self.yslice_hScrollBar.valueChanged.connect(
-                self.yslice_hScrollBar_vchange)
+            self.yslice_hScrollBar_vchange)
         self.yslice_SpinBox.valueChanged.connect(self.yslice_SpinBox_vchange)
         self.zslice_hScrollBar.valueChanged.connect(
-                self.zslice_hScrollBar_vchange)
+            self.zslice_hScrollBar_vchange)
         self.zslice_SpinBox.valueChanged.connect(self.zslice_SpinBox_vchange)
         self.xslice_hScrollBar.setMinimum(int(self.vpic_domain["xmin"]))
         self.xslice_hScrollBar.setMaximum(int(self.vpic_domain["xmax"]))
@@ -272,20 +288,22 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.zslice_hScrollBar.setSliderPosition(int(zmid))
 
         # create a dictionary for the slices
-        self.slice_dist = {"xslice_bar": self.xslice_hScrollBar,
-                           "xslice_box": self.xslice_SpinBox,
-                           "yslice_bar": self.yslice_hScrollBar,
-                           "yslice_box": self.yslice_SpinBox,
-                           "zslice_bar": self.zslice_hScrollBar,
-                           "zslice_box": self.zslice_SpinBox}
+        self.slice_dist = {
+            "xslice_bar": self.xslice_hScrollBar,
+            "xslice_box": self.xslice_SpinBox,
+            "yslice_bar": self.yslice_hScrollBar,
+            "yslice_box": self.yslice_SpinBox,
+            "zslice_bar": self.zslice_hScrollBar,
+            "zslice_box": self.zslice_SpinBox
+        }
 
         # 2D plane
         if self.is_2d:
             self.plane_comboBox.setDisabled(True)
         self.plane_comboBox.currentTextChanged.connect(
-                self.plane_comboBox_vchange)
+            self.plane_comboBox_vchange)
         self.plane_hScrollBar.valueChanged.connect(
-                self.plane_hScrollBar_vchange)
+            self.plane_hScrollBar_vchange)
         self.plane_SpinBox.valueChanged.connect(self.plane_SpinBox_vchange)
         self.set_normal_plane()
         self.set_plane_index()
@@ -300,7 +318,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.savejpg_checkBox.setChecked(False)
         self.save_jpegs = False
         self.savejpg_checkBox.stateChanged.connect(
-                self.savejpg_checkBox_change)
+            self.savejpg_checkBox_change)
 
         # animation buttons
         self.start_animateButton.clicked.connect(self.start_animation)
@@ -313,7 +331,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def plottype_comboBox_change(self, value):
         self.plot_type = value
         self.canvas.fig.clf()
-        self.canvas.update_axes(value)
+        self.canvas.update_axes(self.hv[0].upper(), value)
         self.update_plot()
 
     def rawplot_comboBox_vchange(self, value):
@@ -421,27 +439,33 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def set_normal_plane(self):
         self.hv = [c for c in self.coords if c != self.normal]  # in-plane
         self.plane_comboBox.setCurrentText(self.normal.upper() + "-Plane")
-        self.plane_hScrollBar.setMinimum(int(self.vpic_domain[self.normal +
-                                                              "min"]))
-        self.plane_hScrollBar.setMaximum(int(self.vpic_domain[self.normal +
-                                                              "max"]))
+        self.plane_hScrollBar.setMinimum(
+            int(self.vpic_domain[self.normal + "min"]))
+        self.plane_hScrollBar.setMaximum(
+            int(self.vpic_domain[self.normal + "max"]))
+        old_plane = self.plane_hScrollBar.value()
         self.plane_SpinBox.setMinimum(self.vpic_domain[self.normal + "min"])
         self.plane_SpinBox.setMaximum(self.vpic_domain[self.normal + "max"])
         mid = 0.5 * (self.vpic_domain[self.normal + "min"] +
                      self.vpic_domain[self.normal + "max"])
         self.plane_hScrollBar.setSliderPosition(int(mid))
-        self.plottype_comboBox.setItemText(1, "Contour+" +
-                                           self.hv[0].upper() + "-Average")
-        self.plottype_comboBox.setItemText(2, "Contour+" +
-                                           self.hv[0].upper() + "-Slice")
-        self.plottype_comboBox.setItemText(3, "Contour+" +
-                                           self.hv[1].upper() + "-Slice")
+        if int(mid) == old_plane:  # force update
+            self.set_plane_index()
+            self.read_data(self.var_name, self.tindex)
+            if self.auto_update:
+                self.update_plot()
+        self.plottype_comboBox.setItemText(
+            1, "Contour+" + self.hv[0].upper() + "-Average")
+        self.plottype_comboBox.setItemText(
+            2, "Contour+" + self.hv[0].upper() + "-Slice")
+        self.plottype_comboBox.setItemText(
+            3, "Contour+" + self.hv[1].upper() + "-Slice")
 
     def set_plane_index(self):
         plane_coord = self.plane_SpinBox.value()
         cmin = self.vpic_domain[self.normal + "min"]
-        self.plane_index = int((plane_coord - cmin) /
-                               self.vpic_domain["d" + self.normal])
+        self.plane_index = int(
+            (plane_coord - cmin) / self.vpic_domain["d" + self.normal])
         if self.plane_index == self.vpic_domain["n" + self.normal]:
             self.plane_index = self.vpic_domain["n" + self.normal] - 1
 
@@ -451,10 +475,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def plane_SpinBox_vchange(self, value):
         self.plane_hScrollBar.setValue(int(value))
         self.set_plane_index()
-        if hdf5_fields:
-            self.read_data(self.var_name, self.tindex)
-        else:
-            self.get_sliced_data()
+        self.read_data(self.var_name, self.tindex)
         if self.auto_update:
             self.update_plot()
 
@@ -462,17 +483,20 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if hdf5_fields:
             self.fields_list = ["cbx", "cby", "cbz", "absb", "ex", "ey", "ez"]
             self.jlist = ["jx", "jy", "jz", "absj"]
-            self.ehydro_list = ["ne", "vex", "vey", "vez", "uex", "uey", "uez",
-                                "pexx", "pexy", "pexz", "peyx", "peyy", "peyz",
-                                "pezx", "pezy", "pezz"]
-            self.Hhydro_list = ["ni", "vix", "viy", "viz", "uix", "uiy", "uiz",
-                                "pixx", "pixy", "pixz", "piyx", "piyy", "piyz",
-                                "pizx", "pizy", "pizz"]
+            self.ehydro_list = [
+                "ne", "vex", "vey", "vez", "uex", "uey", "uez", "pexx", "pexy",
+                "pexz", "peyx", "peyy", "peyz", "pezx", "pezy", "pezz"
+            ]
+            self.Hhydro_list = [
+                "ni", "vix", "viy", "viz", "uix", "uiy", "uiz", "pixx", "pixy",
+                "pixz", "piyx", "piyy", "piyz", "pizx", "pizy", "pizz"
+            ]
             self.hydro_list = self.jlist + self.ehydro_list + self.Hhydro_list
             self.var_list = self.fields_list + self.hydro_list
         else:
-            flist = [_ for _ in os.listdir(self.gda_path)
-                     if _.endswith(".gda")]
+            flist = [
+                _ for _ in os.listdir(self.gda_path) if _.endswith(".gda")
+            ]
             if len([name for name in flist if name[:2] == "bx"]) == 1:
                 # all frames are save in the same file
                 self.var_list = sorted([f[:-4] for f in flist])
@@ -486,8 +510,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         _translate = QtCore.QCoreApplication.translate
         for ivar, var in enumerate(self.var_list):
             self.rawplot_comboBox.addItem("")
-            self.rawplot_comboBox.setItemText(ivar, _translate("MainWindow",
-                                                               var))
+            self.rawplot_comboBox.setItemText(ivar,
+                                              _translate("MainWindow", var))
 
     def get_domain(self):
         """Get VPIC simulation domain
@@ -524,16 +548,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                                 self.vpic_domain["zmax"] - hdz,
                                                 self.vpic_domain["nz"])
 
-    def get_sliced_data(self):
-        """Get a slice of 3D data
-        """
-        if self.normal == 'x':
-            self.field_2d = self.field_3d[:, :, self.plane_index].T
-        elif self.normal == 'y':
-            self.field_2d = self.field_3d[:, self.plane_index, :].T
-        else:
-            self.field_2d = self.field_3d[self.plane_index, :, :].T
-
     def read_gda_file(self, vname, tindex):
         """read fields or hydro in gda format
 
@@ -546,8 +560,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             nv = self.vpic_domain["n" + self.hv[1]]
             if self.single_gda:
                 fname = self.gda_path + vname + ".gda"
-                fdata = np.fromfile(fname, dtype=np.float32, count=nh*nv,
-                                    offset=nh*nv*self.tframe*4)
+                fdata = np.fromfile(fname,
+                                    dtype=np.float32,
+                                    count=nh * nv,
+                                    offset=nh * nv * self.tframe * 4)
             else:
                 fname = self.gda_path + vname + "_" + str(self.tindex) + ".gda"
                 fdata = np.fromfile(fname, dtype=np.float32, count=-1)
@@ -559,19 +575,26 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             ntot = nx * ny * nz
             # Since slicing of gda file is incontinent, we read all the 3D
             # data cube and take slices in the memory.
-            if self.single_gda:
-                fname = self.gda_path + vname + ".gda"
-                self.field_3d = np.fromfile(fname,
-                                            dtype=np.float32,
-                                            count=ntot,
-                                            offset=ntot*self.tframe*4).reshape(
-                                                    [nz, ny, nx])
+            if self.tframe_loaded != self.tframe or self.var_loaded != vname:
+                if self.single_gda:
+                    fname = self.gda_path + vname + ".gda"
+                    self.field_3d = np.fromfile(fname,
+                                                dtype=np.float32,
+                                                count=ntot,
+                                                offset=ntot * self.tframe *
+                                                4).reshape([nz, ny, nx])
+                else:
+                    fname = self.gda_path + vname + "_" + str(self.tindex) + ".gda"
+                    self.field_3d = np.fromfile(fname, dtype=np.float32,
+                                                count=-1).reshape([nz, ny, nx])
+            self.tframe_loaded = self.tframe
+            self.var_loaded = vname
+            if self.normal == 'x':
+                self.field_2d = self.field_3d[:, :, self.plane_index].T
+            elif self.normal == 'y':
+                self.field_2d = self.field_3d[:, self.plane_index, :].T
             else:
-                fname = self.gda_path + vname + "_" + str(self.tindex) + ".gda"
-                self.field_3d = np.fromfile(fname,
-                                            dtype=np.float32,
-                                            count=-1).reshape([nz, ny, nx])
-            self.get_sliced_data()
+                self.field_2d = self.field_3d[self.plane_index, :, :].T
 
     def read_fields(self, vname, tindex):
         """read electric and magnetic fields in HDF5 format
@@ -581,8 +604,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             tindex (int): time index
         """
         if smoothed_data:
-            fname = ("./" + dir_smooth_data + "/fields_" +
-                     str(tindex) + ".h5")
+            fname = ("./" + dir_smooth_data + "/fields_" + str(tindex) + ".h5")
         else:
             fdir = "./field_hdf5/T." + str(tindex) + "/"
             fname = fdir + "fields_" + str(tindex) + ".h5"
@@ -598,8 +620,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         bvec[var] = dset[:, self.plane_index, :]
                     else:
                         bvec[var] = dset[:, :, self.plane_index]
-                self.field_2d = np.sqrt(bvec["cbx"]**2 +
-                                        bvec["cby"]**2 +
+                self.field_2d = np.sqrt(bvec["cbx"]**2 + bvec["cby"]**2 +
                                         bvec["cbz"]**2)
             else:
                 dset = group[vname]
@@ -652,8 +673,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             tindex (int): time index
         """
         if smoothed_data:
-            fname = ("./" + dir_smooth_data + "/hydro_ion_" +
-                     str(tindex) + ".h5")
+            fname = ("./" + dir_smooth_data + "/hydro_ion_" + str(tindex) +
+                     ".h5")
         else:
             fdir = "./hydro_hdf5/T." + str(tindex) + "/"
             fname = fdir + "hydro_ion_" + str(tindex) + ".h5"
@@ -669,9 +690,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         j[var] += dset[:, self.plane_index, :]
                     else:
                         j[var] += dset[:, :, self.plane_index]
-                self.field_2d = np.sqrt(j["jx"]**2 +
-                                        j["jy"]**2 +
-                                        j["jz"]**2)
+                self.field_2d = np.sqrt(j["jx"]**2 + j["jy"]**2 + j["jz"]**2)
             else:
                 dset = group[vname]
                 if self.normal == 'x':
@@ -708,8 +727,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             pmass = 1.0
         else:
             if smoothed_data:
-                fname = ("./" + dir_smooth_data + "/hydro_ion_" +
-                         str(tindex) + ".h5")
+                fname = ("./" + dir_smooth_data + "/hydro_ion_" + str(tindex) +
+                         ".h5")
             else:
                 fdir = "./hydro_hdf5/T." + str(tindex) + "/"
                 fname = fdir + "hydro_ion_" + str(tindex) + ".h5"
@@ -827,25 +846,29 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             orientation = "horizontal"
         elif self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
             lvp *= 1.25
-        denp = max(lhp/self.width_max, lvp/self.height_max)
+        denp = max(lhp / self.width_max, lvp / self.height_max)
         canvas_h = int(lhp / denp)
         canvas_v = int(lvp / denp)
-        if canvas_h < self.width_max // 5:
-            canvas_h = self.width_max // 5
-        if canvas_v < self.height_max // 5:
-            canvas_v = self.height_max // 5
+        if canvas_h < self.width_max // 4:
+            canvas_h = self.width_max // 4
+        if canvas_v < self.height_max // 4:
+            canvas_v = self.height_max // 4
         canvas_l = self.middle - canvas_h // 2
         self.canvas.ax_main.clear()
-        self.plot_vLayoutWidget.setGeometry(QtCore.QRect(canvas_l, self.top,
-                                                         canvas_h, canvas_v))
+        self.plot_vLayoutWidget.setGeometry(
+            QtCore.QRect(canvas_l, self.top, canvas_h, canvas_v))
 
         im = self.canvas.ax_main.imshow(self.field_2d[ihs:ihe, ivs:ive].T,
                                         extent=[hmin, hmax, vmin, vmax],
-                                        vmin=dmin, vmax=dmax,
-                                        cmap=cmap, aspect='auto',
-                                        origin='lower', interpolation='none')
+                                        vmin=dmin,
+                                        vmax=dmax,
+                                        cmap=cmap,
+                                        aspect='auto',
+                                        origin='lower',
+                                        interpolation='none')
         self.canvas.ax_cbar.clear()
-        self.canvas.fig.colorbar(im, cax=self.canvas.ax_cbar,
+        self.canvas.fig.colorbar(im,
+                                 cax=self.canvas.ax_cbar,
                                  orientation=orientation)
         self.canvas.ax_main.set_xlabel(r"$" + h + "/d_e$", fontsize=16)
         self.canvas.ax_main.set_ylabel(r"$" + v + "/d_e$", fontsize=16)
