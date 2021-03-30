@@ -900,9 +900,18 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # save the figure
         if self.save_jpegs and self.is_animation:
-            img_dir = "./img/" + self.var_name + "/"
+            if self.is_2d:
+                img_dir = "./img/" + self.var_name + "/"
+            else:
+                img_dir = ("./img/" + self.var_name + "/tframe_" +
+                           str(self.tframe) + "/")
             mkdir_p(img_dir)
-            fname = img_dir + self.var_name + "_" + str(self.tframe) + ".jpg"
+            if self.is_2d:
+                fname = (img_dir + self.var_name + "_" + str(self.tframe) +
+                         ".jpg")
+            else:
+                fname = (img_dir + self.var_name + "_" + self.normal + "_" +
+                         str(self.plane_index) + ".jpg")
             self.canvas.fig.savefig(fname)
 
     def start_animation(self):
