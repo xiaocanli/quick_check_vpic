@@ -40,14 +40,15 @@ def get_vpic_info():
 
 
 vpic_info = get_vpic_info()
-hdf5_fields = True  # whether data is in HDF5 format
-smoothed_data = True  # whether data is smoothed
+hdf5_fields = False  # whether data is in HDF5 format
+smoothed_data = False  # whether data is smoothed
 if smoothed_data:
     smooth_factor = 24  # smooth factor along each direction
 else:
     smooth_factor = 1
 dir_smooth_data = "data_smooth"
-tmin, tmax = 0, 125
+momentum_field = False
+tmin, tmax = 0, 2
 animation_tinterval = 100  # in msec
 nt = tmax - tmin + 1
 
@@ -154,6 +155,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.raw_plot_variables()
         self.rawplot_comboBox.currentTextChanged.connect(
             self.rawplot_comboBox_vchange)
+
+        # Diagnostics plot variables
+        self.diag_plot = False  # whether to plot diagnostics
+        self.diag_var_name = ""
+        self.diag_plot_variables()
+        self.diagplot_comboBox.currentTextChanged.connect(
+            self.diagplot_comboBox_vchange)
 
         # Create toolbar and canvas
         self.margin = 30
@@ -337,9 +345,18 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.update_plot()
 
     def rawplot_comboBox_vchange(self, value):
-        self.var_name = self.rawplot_comboBox.currentText()
-        self.read_data(self.var_name, self.tindex)
-        self.update_plot()
+        if not self.diag_plot:
+            self.var_name = self.rawplot_comboBox.currentText()
+            self.read_data(self.var_name, self.tindex)
+            self.update_plot()
+
+    def diagplot_comboBox_vchange(self, value):
+        self.diag_var_name = self.diagplot_comboBox.currentText()
+        if self.diag_var_name != "":
+            self.diag_plot = True
+            self.var_name = self.diag_var_name
+            self.read_data(self.var_name, self.tindex)
+            self.update_plot()
 
     def savejpg_checkBox_change(self):
         self.save_jpegs = not self.save_jpegs
@@ -486,15 +503,27 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.fields_list = ["cbx", "cby", "cbz", "absb", "ex", "ey", "ez"]
             self.jlist = ["jx", "jy", "jz", "absj"]
             self.ehydro_list = [
-                "ne", "vex", "vey", "vez", "uex", "uey", "uez", "pexx", "pexy",
-                "pexz", "peyx", "peyy", "peyz", "pezx", "pezy", "pezz"
+                "ne", "vex", "vey", "vez", "pexx", "pexy", "pexz", "peyx",
+                "peyy", "peyz", "pezx", "pezy", "pezz"
             ]
             self.Hhydro_list = [
-                "ni", "vix", "viy", "viz", "uix", "uiy", "uiz", "pixx", "pixy",
-                "pixz", "piyx", "piyy", "piyz", "pizx", "pizy", "pizz"
+                "ni", "vix", "viy", "viz", "pixx", "pixy", "pixz", "piyx",
+                "piyy", "piyz", "pizx", "pizy", "pizz"
             ]
+            if momentum_field:
+                self.ehydro_list += [
+                    "uex",
+                    "uey",
+                    "uez",
+                ]
+                self.Hhydro_list += [
+                    "uix",
+                    "uiy",
+                    "uiz",
+                ]
             self.hydro_list = self.jlist + self.ehydro_list + self.Hhydro_list
             self.var_list = self.fields_list + self.hydro_list
+            self.var_list = sorted(set(self.var_list))
         else:
             flist = [
                 _ for _ in os.listdir(self.gda_path) if _.endswith(".gda")
@@ -514,6 +543,14 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.rawplot_comboBox.addItem("")
             self.rawplot_comboBox.setItemText(ivar,
                                               _translate("MainWindow", var))
+
+    def diag_plot_variables(self):
+        self.diag_var_list = ["", "jdotE"]
+        _translate = QtCore.QCoreApplication.translate
+        for ivar, var in enumerate(self.diag_var_list):
+            self.diagplot_comboBox.addItem("")
+            self.diagplot_comboBox.setItemText(ivar,
+                                               _translate("MainWindow", var))
 
     def get_domain(self):
         """Get VPIC simulation domain
@@ -569,7 +606,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             else:
                 fname = self.gda_path + vname + "_" + str(self.tindex) + ".gda"
                 fdata = np.fromfile(fname, dtype=np.float32, count=-1)
-            self.field_2d = fdata.reshape([nv, nh]).T
+            field_2d = fdata.reshape([nv, nh]).T
+            return field_2d, field_2d
         else:
             nx = self.vpic_domain["nx"]
             ny = self.vpic_domain["ny"]
@@ -580,25 +618,25 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             if self.tframe_loaded != self.tframe or self.var_loaded != vname:
                 if self.single_gda:
                     fname = self.gda_path + vname + ".gda"
-                    self.field_3d = np.fromfile(fname,
-                                                dtype=np.float32,
-                                                count=ntot,
-                                                offset=ntot * self.tframe *
-                                                4).reshape([nz, ny, nx])
+                    field_3d = np.fromfile(fname,
+                                           dtype=np.float32,
+                                           count=ntot,
+                                           offset=ntot * self.tframe *
+                                           4).reshape([nz, ny, nx])
                 else:
                     fname = self.gda_path + vname + "_" + str(
                         self.tindex) + ".gda"
-                    self.field_3d = np.fromfile(fname,
-                                                dtype=np.float32,
-                                                count=-1).reshape([nz, ny, nx])
+                    field_3d = np.fromfile(fname, dtype=np.float32,
+                                           count=-1).reshape([nz, ny, nx])
             self.tframe_loaded = self.tframe
             self.var_loaded = vname
             if self.normal == 'x':
-                self.field_2d = self.field_3d[:, :, self.plane_index].T
+                field_2d = field_3d[:, :, self.plane_index].T
             elif self.normal == 'y':
-                self.field_2d = self.field_3d[:, self.plane_index, :].T
+                field_2d = field_3d[:, self.plane_index, :].T
             else:
-                self.field_2d = self.field_3d[self.plane_index, :, :].T
+                field_2d = field_3d[self.plane_index, :, :].T
+            return field_2d, field_3d
 
     def read_fields(self, vname, tindex):
         """read electric and magnetic fields in HDF5 format
@@ -624,16 +662,17 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         bvec[var] = dset[:, self.plane_index, :]
                     else:
                         bvec[var] = dset[:, :, self.plane_index]
-                self.field_2d = np.sqrt(bvec["cbx"]**2 + bvec["cby"]**2 +
-                                        bvec["cbz"]**2)
+                field_2d = np.sqrt(bvec["cbx"]**2 + bvec["cby"]**2 +
+                                   bvec["cbz"]**2)
             else:
                 dset = group[vname]
                 if self.normal == 'x':
-                    self.field_2d = dset[self.plane_index, :, :]
+                    field_2d = dset[self.plane_index, :, :]
                 elif self.normal == 'y':
-                    self.field_2d = dset[:, self.plane_index, :]
+                    field_2d = dset[:, self.plane_index, :]
                 else:
-                    self.field_2d = dset[:, :, self.plane_index]
+                    field_2d = dset[:, :, self.plane_index]
+        return field_2d
 
     def read_current_density(self, vname, tindex):
         """read current density
@@ -661,15 +700,15 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         j[var] = dset[:, self.plane_index, :]
                     else:
                         j[var] = dset[:, :, self.plane_index]
-                self.field_2d = np.sqrt(j["jx"]**2 + j["jy"]**2 + j["jz"]**2)
+                field_2d = np.sqrt(j["jx"]**2 + j["jy"]**2 + j["jz"]**2)
             else:
                 dset = group[vname]
                 if self.normal == 'x':
-                    self.field_2d = dset[self.plane_index, :, :]
+                    field_2d = dset[self.plane_index, :, :]
                 elif self.normal == 'y':
-                    self.field_2d = dset[:, self.plane_index, :]
+                    field_2d = dset[:, self.plane_index, :]
                 else:
-                    self.field_2d = dset[:, :, self.plane_index]
+                    field_2d = dset[:, :, self.plane_index]
 
         # Ion
         if smoothed_data:
@@ -689,15 +728,16 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         j[var] += dset[:, self.plane_index, :]
                     else:
                         j[var] += dset[:, :, self.plane_index]
-                self.field_2d = np.sqrt(j["jx"]**2 + j["jy"]**2 + j["jz"]**2)
+                field_2d = np.sqrt(j["jx"]**2 + j["jy"]**2 + j["jz"]**2)
             else:
                 dset = group[vname]
                 if self.normal == 'x':
-                    self.field_2d += dset[self.plane_index, :, :]
+                    field_2d += dset[self.plane_index, :, :]
                 elif self.normal == 'y':
-                    self.field_2d += dset[:, self.plane_index, :]
+                    field_2d += dset[:, self.plane_index, :]
                 else:
-                    self.field_2d += dset[:, :, self.plane_index]
+                    field_2d += dset[:, :, self.plane_index]
+        return field_2d
 
     def read_hydro(self, vname, tindex):
         """Read hydro data from file
@@ -738,30 +778,30 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     var = "t" + vname[-1] + vname[-2]
             dset = group[var]
             if self.normal == 'x':
-                self.field_2d = dset[self.plane_index, :, :]
+                field_2d = dset[self.plane_index, :, :]
             elif self.normal == 'y':
-                self.field_2d = dset[:, self.plane_index, :]
+                field_2d = dset[:, self.plane_index, :]
             else:
-                self.field_2d = dset[:, :, self.plane_index]
+                field_2d = dset[:, :, self.plane_index]
             if vname[0] == 'n':
-                self.field_2d = np.abs(self.field_2d)
+                field_2d = np.abs(field_2d)
             elif vname[0] == 'v':
                 dset = group["rho"]
                 if self.normal == 'x':
-                    self.field_2d /= dset[self.plane_index, :, :]
+                    field_2d /= dset[self.plane_index, :, :]
                 elif self.normal == 'y':
-                    self.field_2d /= dset[:, self.plane_index, :]
+                    field_2d /= dset[:, self.plane_index, :]
                 else:
-                    self.field_2d /= dset[:, :, self.plane_index]
+                    field_2d /= dset[:, :, self.plane_index]
             elif vname[0] == 'u':
                 dset = group["rho"]
                 if self.normal == 'x':
-                    self.field_2d /= np.abs(dset[self.plane_index, :, :])
+                    field_2d /= np.abs(dset[self.plane_index, :, :])
                 elif self.normal == 'y':
-                    self.field_2d /= np.abs(dset[:, self.plane_index, :])
+                    field_2d /= np.abs(dset[:, self.plane_index, :])
                 else:
-                    self.field_2d /= np.abs(dset[:, :, self.plane_index])
-                self.field_2d /= pmass
+                    field_2d /= np.abs(dset[:, :, self.plane_index])
+                field_2d /= pmass
             else:
                 dset = group["rho"]
                 if self.normal == 'x':
@@ -779,11 +819,39 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     v = dset[:, :, self.plane_index] / rho
                 dset = group["p" + vname[-1]]
                 if self.normal == 'x':
-                    self.field_2d -= v * dset[self.plane_index, :, :]
+                    field_2d -= v * dset[self.plane_index, :, :]
                 elif self.normal == 'y':
-                    self.field_2d -= v * dset[:, self.plane_index, :]
+                    field_2d -= v * dset[:, self.plane_index, :]
                 else:
-                    self.field_2d -= v * dset[:, :, self.plane_index]
+                    field_2d -= v * dset[:, :, self.plane_index]
+        return field_2d
+
+    def get_jdote(self, tindex):
+        """get the diagnostics data of j.E
+        """
+        if hdf5_fields:
+            jx = self.read_current_density("jx", tindex)
+            jy = self.read_current_density("jy", tindex)
+            jz = self.read_current_density("jz", tindex)
+            ex = self.read_fields("ex", tindex)
+            ey = self.read_fields("ey", tindex)
+            ez = self.read_fields("ez", tindex)
+            field_2d = jx * ex + jy * ey + jz * ez
+            return field_2d, field_2d
+        else:
+            j2d, j3d = self.read_gda_file("jx", tindex)
+            e2d, e3d = self.read_gda_file("ex", tindex)
+            field_2d = j2d * e2d
+            field_3d = j2d * e3d
+            j2d, j3d = self.read_gda_file("jy", tindex)
+            e2d, e3d = self.read_gda_file("ey", tindex)
+            field_2d += j2d * e2d
+            field_3d += j2d * e3d
+            j2d, j3d = self.read_gda_file("jz", tindex)
+            e2d, e3d = self.read_gda_file("ez", tindex)
+            field_2d += j2d * e2d
+            field_3d += j2d * e3d
+            return field_2d, field_3d
 
     def read_data(self, vname, tindex):
         """Read data from file
@@ -792,15 +860,20 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             vname (string): variable name
             tindex (int): time index
         """
-        if hdf5_fields:
-            if vname in self.fields_list:  # electric and magnetic fields
-                self.read_fields(vname, tindex)
-            elif vname in self.jlist:  # current density
-                self.read_current_density(vname, tindex)
-            else:  # density, velocity, momentum, pressure tensor
-                self.read_hydro(vname, tindex)
+        if self.diag_plot:
+            if self.diag_var_name == "jdotE":
+                self.field_2d, self.field_3d = self.get_jdote(tindex)
         else:
-            self.read_gda_file(vname, tindex)
+            if hdf5_fields:
+                if vname in self.fields_list:  # electric and magnetic fields
+                    self.field_2d = self.read_fields(vname, tindex)
+                elif vname in self.jlist:  # current density
+                    self.field_2d = self.read_current_density(vname, tindex)
+                else:  # density, velocity, momentum, pressure tensor
+                    self.field_2d = self.read_hydro(vname, tindex)
+            else:
+                self.field_2d, self.field_3d = self.read_gda_file(
+                    vname, tindex)
 
     def update_plot(self):
         if np.any(self.field_2d < 0) and np.any(self.field_2d > 0):
@@ -897,21 +970,14 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.canvas.ax1d.set_xlim(self.canvas.ax_main.get_xlim())
         # Trigger the canvas to update and redraw.
         self.canvas.draw()
+        plt.tight_layout()
 
         # save the figure
         if self.save_jpegs and self.is_animation:
-            if self.is_2d:
-                img_dir = "./img/" + self.var_name + "/"
-            else:
-                img_dir = ("./img/" + self.var_name + "/tframe_" +
-                           str(self.tframe) + "/")
+            img_dir = ("./img/" + self.var_name + "/" + self.normal + "_" +
+                       str(self.plane_index) + "/")
             mkdir_p(img_dir)
-            if self.is_2d:
-                fname = (img_dir + self.var_name + "_" + str(self.tframe) +
-                         ".jpg")
-            else:
-                fname = (img_dir + self.var_name + "_" + self.normal + "_" +
-                         str(self.plane_index) + ".jpg")
+            fname = img_dir + self.var_name + "_" + str(self.tframe) + ".jpg"
             self.canvas.fig.savefig(fname)
 
     def start_animation(self):
