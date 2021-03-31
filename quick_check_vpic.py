@@ -40,15 +40,15 @@ def get_vpic_info():
 
 
 vpic_info = get_vpic_info()
-hdf5_fields = False  # whether data is in HDF5 format
-smoothed_data = False  # whether data is smoothed
+hdf5_fields = True  # whether data is in HDF5 format
+smoothed_data = True  # whether data is smoothed
 if smoothed_data:
     smooth_factor = 24  # smooth factor along each direction
 else:
     smooth_factor = 1
 dir_smooth_data = "data_smooth"
 momentum_field = False
-tmin, tmax = 0, 2
+tmin, tmax = 0, 125
 animation_tinterval = 100  # in msec
 nt = tmax - tmin + 1
 
@@ -355,6 +355,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if self.diag_var_name != "":
             self.diag_plot = True
             self.var_name = self.diag_var_name
+            self.read_data(self.var_name, self.tindex)
+            self.update_plot()
+        else:
+            self.diag_plot = False
+            self.var_name = self.rawplot_comboBox.currentText()
             self.read_data(self.var_name, self.tindex)
             self.update_plot()
 
