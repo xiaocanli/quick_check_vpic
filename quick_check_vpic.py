@@ -41,14 +41,17 @@ def get_vpic_info():
 
 vpic_info = get_vpic_info()
 hdf5_fields = True  # whether data is in HDF5 format
-smoothed_data = True  # whether data is smoothed
+smoothed_data = False  # whether data is smoothed
 if smoothed_data:
     smooth_factor = 24  # smooth factor along each direction
 else:
     smooth_factor = 1
 dir_smooth_data = "data_smooth"
-momentum_field = False
-tmin, tmax = 0, 125
+momentum_field = False  # whether momentum and kinetic energy data are dumped
+time_averaged_field = False  # whether it is time-averaged field
+tmin, tmax = 0, 32
+if time_averaged_field:
+    tmin = 1
 animation_tinterval = 100  # in msec
 nt = tmax - tmin + 1
 
@@ -653,7 +656,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if smoothed_data:
             fname = ("./" + dir_smooth_data + "/fields_" + str(tindex) + ".h5")
         else:
-            fdir = "./field_hdf5/T." + str(tindex) + "/"
+            if time_averaged_field:
+                fdir = "./fields-avg-hdf5/T." + str(tindex) + "/"
+            else:
+                fdir = "./field_hdf5/T." + str(tindex) + "/"
             fname = fdir + "fields_" + str(tindex) + ".h5"
         with h5py.File(fname, 'r') as fh:
             group = fh["Timestep_" + str(tindex)]
@@ -691,7 +697,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             fname = ("./" + dir_smooth_data + "/hydro_ion_" + str(tindex) +
                      ".h5")
         else:
-            fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+            if time_averaged_field:
+                fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
+            else:
+                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
             fname = fdir + "hydro_electron_" + str(tindex) + ".h5"
         with h5py.File(fname, 'r') as fh:
             group = fh["Timestep_" + str(tindex)]
@@ -720,7 +729,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             fname = ("./" + dir_smooth_data + "/hydro_ion_" + str(tindex) +
                      ".h5")
         else:
-            fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+            if time_averaged_field:
+                fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
+            else:
+                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
             fname = fdir + "hydro_ion_" + str(tindex) + ".h5"
         with h5py.File(fname, 'r') as fh:
             group = fh["Timestep_" + str(tindex)]
@@ -756,7 +768,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 fname = ("./" + dir_smooth_data + "/hydro_electron_" +
                          str(tindex) + ".h5")
             else:
-                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+                if time_averaged_field:
+                    fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
+                else:
+                    fdir = "./hydro_hdf5/T." + str(tindex) + "/"
                 fname = fdir + "hydro_electron_" + str(tindex) + ".h5"
             pmass = 1.0
         else:
@@ -764,7 +779,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 fname = ("./" + dir_smooth_data + "/hydro_ion_" + str(tindex) +
                          ".h5")
             else:
-                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+                if time_averaged_field:
+                    fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
+                else:
+                    fdir = "./hydro_hdf5/T." + str(tindex) + "/"
                 fname = fdir + "hydro_ion_" + str(tindex) + ".h5"
             pmass = vpic_info["mi/me"]
         with h5py.File(fname, 'r') as fh:
