@@ -41,15 +41,15 @@ def get_vpic_info():
 
 vpic_info = get_vpic_info()
 hdf5_fields = True  # whether data is in HDF5 format
-smoothed_data = False  # whether data is smoothed
+smoothed_data = True  # whether data is smoothed
 if smoothed_data:
-    smooth_factor = 24  # smooth factor along each direction
+    smooth_factor = 2  # smooth factor along each direction
 else:
     smooth_factor = 1
 dir_smooth_data = "data_smooth"
 momentum_field = False  # whether momentum and kinetic energy data are dumped
 time_averaged_field = False  # whether it is time-averaged field
-tmin, tmax = 0, 32
+tmin, tmax = 0, 25
 if time_averaged_field:
     tmin = 1
 animation_tinterval = 100  # in msec
@@ -93,23 +93,26 @@ class MplCanvas(FigureCanvasQTAgg):
                 "Contour+" + axes_h + "-Average",
                 "Contour+" + axes_h + "-Slice"
         ]:
-            widths = [4, 1]
-            heights = [4.8, 0.2]
-            spec = self.fig.add_gridspec(nrows=2,
-                                         ncols=2,
+            widths = [0.2, 4.8, 1.2]
+            spec = self.fig.add_gridspec(nrows=1,
+                                         ncols=3,
                                          width_ratios=widths,
-                                         height_ratios=heights)
-            self.ax_main = self.fig.add_subplot(spec[0, 0])
-            self.ax1d = self.fig.add_subplot(spec[0, 1])
-            self.ax_cbar = self.fig.add_subplot(spec[1, 0])
+                                         wspace=0.0,
+                                         hspace=0.0)
+            self.ax_main = self.fig.add_subplot(spec[0, 1])
+            self.ax1d = self.fig.add_subplot(spec[0, 2])
+            self.ax_cbar = self.fig.add_subplot(spec[0, 0])
         else:
             widths = [4.8, 0.2]
-            heights = [4, 1]
+            heights = [4.8, 1.2]
             spec = self.fig.add_gridspec(nrows=2,
                                          ncols=2,
                                          width_ratios=widths,
-                                         height_ratios=heights)
+                                         height_ratios=heights,
+                                         wspace=0.0,
+                                         hspace=0.0)
             self.ax_main = self.fig.add_subplot(spec[0, 0])
+            self.ax_main.tick_params(axis='x', labelbottom=False)
             self.ax1d = self.fig.add_subplot(spec[1, 0])
             self.ax_cbar = self.fig.add_subplot(spec[0, 1])
 
@@ -197,6 +200,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.tframe_SpinBox.setMinimum(self.tframe_hSlider.minimum())
         self.tframe_SpinBox.setMaximum(self.tframe_hSlider.maximum())
         self.tframe_hSlider.valueChanged.connect(self.tframe_hSlider_vchange)
+        self.tframe_hSlider.sliderPressed.connect(
+            self.tframe_hSlider_disconnect)
+        self.tframe_hSlider.sliderReleased.connect(
+            self.tframe_hSlider_reconnect)
+        self.tframe_SpinBox.setKeyboardTracking(False)
         self.tframe_SpinBox.valueChanged.connect(self.tframe_SpinBox_vchange)
         self.var_name = self.rawplot_comboBox.currentText()
         self.plot_type = self.plottype_comboBox.currentText()
@@ -315,8 +323,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.plane_comboBox.setDisabled(True)
         self.plane_comboBox.currentTextChanged.connect(
             self.plane_comboBox_vchange)
+        self.plane_hScrollBar.sliderPressed.connect(
+            self.plane_hScrollBar_disconnect)
+        self.plane_hScrollBar.sliderReleased.connect(
+            self.plane_hScrollBar_reconnect)
         self.plane_hScrollBar.valueChanged.connect(
             self.plane_hScrollBar_vchange)
+        self.plane_SpinBox.setKeyboardTracking(False)
         self.plane_SpinBox.valueChanged.connect(self.plane_SpinBox_vchange)
         self.set_normal_plane()
         self.set_plane_index()
@@ -379,6 +392,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.read_data(self.var_name, self.tindex)
         if self.auto_update:
             self.update_plot()
+
+    def tframe_hSlider_disconnect(self):
+        self.sender().valueChanged.disconnect()
+
+    def tframe_hSlider_reconnect(self):
+        self.sender().valueChanged.connect(self.tframe_hSlider_vchange)
+        self.sender().valueChanged.emit(self.sender().value())
 
     def tframe_SpinBox_vchange(self, value):
         self.tframe_hSlider.setValue(value)
@@ -495,6 +515,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             (plane_coord - cmin) / self.vpic_domain["d" + self.normal])
         if self.plane_index == self.vpic_domain["n" + self.normal]:
             self.plane_index = self.vpic_domain["n" + self.normal] - 1
+
+    def plane_hScrollBar_disconnect(self):
+        self.sender().valueChanged.disconnect()
+
+    def plane_hScrollBar_reconnect(self):
+        self.sender().valueChanged.connect(self.plane_hScrollBar_vchange)
+        self.sender().valueChanged.emit(self.sender().value())
 
     def plane_hScrollBar_vchange(self, value):
         self.plane_SpinBox.setValue(float(value))
@@ -928,16 +955,18 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         orientation = "vertical"
         if ("Contour+" + self.hv[0].upper()) in self.plot_type:
             lhp *= 1.25
-            orientation = "horizontal"
         elif self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
             lvp *= 1.25
         denp = max(lhp / self.width_max, lvp / self.height_max)
         canvas_h = int(lhp / denp)
         canvas_v = int(lvp / denp)
-        if canvas_h < self.width_max // 4:
-            canvas_h = self.width_max // 4
-        if canvas_v < self.height_max // 4:
-            canvas_v = self.height_max // 4
+        if canvas_h < self.width_max // 3:
+            canvas_h = self.width_max // 3
+        if canvas_v < self.height_max // 3:
+            canvas_v = self.height_max // 3
+        if self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
+            if canvas_v < self.height_max // 2:
+                canvas_v = self.height_max // 2
         canvas_l = self.middle - canvas_h // 2
         self.canvas.ax_main.clear()
         self.plot_vLayoutWidget.setGeometry(
@@ -955,8 +984,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.canvas.fig.colorbar(im,
                                  cax=self.canvas.ax_cbar,
                                  orientation=orientation)
-        self.canvas.ax_main.set_xlabel(r"$" + h + "/d_e$", fontsize=16)
-        self.canvas.ax_main.set_ylabel(r"$" + v + "/d_e$", fontsize=16)
 
         # 1D plot
         if self.plot_type == "Contour+" + self.hv[0].upper() + "-Average":
@@ -991,9 +1018,16 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.canvas.ax1d.plot(self.vpic_domain[h + "grid"][ihs:ihe],
                                   self.field_1d[ihs:ihe])
             self.canvas.ax1d.set_xlim(self.canvas.ax_main.get_xlim())
+
+        if self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
+            self.canvas.ax1d.set_xlabel(r"$" + h + "/d_e$", fontsize=12)
+        else:
+            self.canvas.ax_main.set_xlabel(r"$" + h + "/d_e$", fontsize=12)
+        self.canvas.ax_main.set_ylabel(r"$" + v + "/d_e$", fontsize=12)
+
         # Trigger the canvas to update and redraw.
         self.canvas.draw()
-        plt.tight_layout()
+        # plt.tight_layout()
 
         # save the figure
         if self.save_jpegs and self.is_animation:
