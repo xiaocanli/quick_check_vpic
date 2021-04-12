@@ -100,7 +100,7 @@ class MplCanvas(FigureCanvasQTAgg):
                                          wspace=0.0,
                                          hspace=0.0)
             self.ax_main = self.fig.add_subplot(spec[0, 1])
-            self.ax1d = self.fig.add_subplot(spec[0, 2])
+            self.ax1d = self.fig.add_subplot(spec[0, 2], sharey=self.ax_main)
             self.ax_cbar = self.fig.add_subplot(spec[0, 0])
         else:
             widths = [4.8, 0.2]
@@ -113,7 +113,7 @@ class MplCanvas(FigureCanvasQTAgg):
                                          hspace=0.0)
             self.ax_main = self.fig.add_subplot(spec[0, 0])
             self.ax_main.tick_params(axis='x', labelbottom=False)
-            self.ax1d = self.fig.add_subplot(spec[1, 0])
+            self.ax1d = self.fig.add_subplot(spec[1, 0], sharex=self.ax_main)
             self.ax_cbar = self.fig.add_subplot(spec[0, 1])
 
 
