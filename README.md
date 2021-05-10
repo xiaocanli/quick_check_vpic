@@ -17,7 +17,7 @@ It requires `h5py`, `matplotlib`, `numpy`, and `PyQt5`.
     ```
     where the trick is to install the same version of `PyQt5` as the system `qt5`. You can also upgrade `h5py` and `numpy` similarly. Then, you can use the [TACC visualization portal](https://vis.tacc.utexas.edu/#) (VNC) to launch the GUI program.
 
-You need to change a few parameters near the top of the program: `hdf5_fields`, `smoothed_data`, `smooth_factor`, `dir_smooth_data`, `momentum_field`, `time_averaged_field`, `tmin`, `tmax`, and `animation_tinterval`. After making the changes, you can launch the GUI program in the simulation directory.
+You need to change a few parameters near the top of the program: `hdf5_fields`, `smoothed_data`, `smooth_factor`, `dir_smooth_data`, `momentum_field`, `time_averaged_field`, `turbulence_mixing`, `tmin`, `tmax`, and `animation_tinterval`. After making the changes, you can launch the GUI program in the simulation directory.
 ```sh
 python3 quick_check_vpic.py
 ```

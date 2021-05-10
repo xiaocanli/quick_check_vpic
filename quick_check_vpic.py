@@ -41,15 +41,16 @@ def get_vpic_info():
 
 vpic_info = get_vpic_info()
 hdf5_fields = True  # whether data is in HDF5 format
-smoothed_data = True  # whether data is smoothed
+smoothed_data = False  # whether data is smoothed
 if smoothed_data:
     smooth_factor = 2  # smooth factor along each direction
 else:
     smooth_factor = 1
 dir_smooth_data = "data_smooth"
-momentum_field = False  # whether momentum and kinetic energy data are dumped
+momentum_field = True  # whether momentum and kinetic energy data are dumped
 time_averaged_field = False  # whether it is time-averaged field
-tmin, tmax = 0, 25
+turbulence_mixing = True  # whether it has turbulence mixing diagnostics
+tmin, tmax = 0, 2
 if time_averaged_field:
     tmin = 1
 animation_tinterval = 100  # in msec
@@ -581,6 +582,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def diag_plot_variables(self):
         self.diag_var_list = ["", "jdotE"]
+        if turbulence_mixing:
+            self.diag_var_list.append("emix")
         _translate = QtCore.QCoreApplication.translate
         for ivar, var in enumerate(self.diag_var_list):
             self.diagplot_comboBox.addItem("")
@@ -712,6 +715,45 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     field_2d = dset[:, :, self.plane_index]
         return field_2d
 
+    def read_current_density_species(self, vname, tindex, species):
+        """read current density associated with one species
+
+        Args:
+            vname (string): variable name
+            tindex (int): time index
+            species (string): particle species
+        """
+        if smoothed_data:
+            fname = ("./" + dir_smooth_data + "/hydro_" + species + "_" +
+                     str(tindex) + ".h5")
+        else:
+            if time_averaged_field:
+                fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
+            else:
+                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+            fname = fdir + "hydro_" + species + "_" + str(tindex) + ".h5"
+        j2d = {}
+        with h5py.File(fname, 'r') as fh:
+            group = fh["Timestep_" + str(tindex)]
+            if vname == "absj":
+                for var in ["jx", "jy", "jz"]:
+                    dset = group[var]
+                    if self.normal == 'x':
+                        j2d[var] = dset[self.plane_index, :, :]
+                    elif self.normal == 'y':
+                        j2d[var] = dset[:, self.plane_index, :]
+                    else:
+                        j2d[var] = dset[:, :, self.plane_index]
+            else:
+                dset = group[vname]
+                if self.normal == 'x':
+                    j2d["jdir"] = dset[self.plane_index, :, :]
+                elif self.normal == 'y':
+                    j2d["jdir"] = dset[:, self.plane_index, :]
+                else:
+                    j2d["jdir"] = dset[:, :, self.plane_index]
+        return j2d
+
     def read_current_density(self, vname, tindex):
         """read current density
 
@@ -720,68 +762,95 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             tindex (int): time index
         """
         # Electron
-        if smoothed_data:
-            fname = ("./" + dir_smooth_data + "/hydro_ion_" + str(tindex) +
-                     ".h5")
+        if turbulence_mixing:
+            j2d = self.read_current_density_species(vname, tindex,
+                                                    "electronTop")
+            jtmp = self.read_current_density_species(vname, tindex,
+                                                     "electronBot")
+            for var in j2d:
+                j2d[var] += jtmp[var]
         else:
-            if time_averaged_field:
-                fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
-            else:
-                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
-            fname = fdir + "hydro_electron_" + str(tindex) + ".h5"
-        with h5py.File(fname, 'r') as fh:
-            group = fh["Timestep_" + str(tindex)]
-            if vname == "absj":
-                j = {}
-                for var in ["jx", "jy", "jz"]:
-                    dset = group[var]
-                    if self.normal == 'x':
-                        j[var] = dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
-                        j[var] = dset[:, self.plane_index, :]
-                    else:
-                        j[var] = dset[:, :, self.plane_index]
-                field_2d = np.sqrt(j["jx"]**2 + j["jy"]**2 + j["jz"]**2)
-            else:
-                dset = group[vname]
-                if self.normal == 'x':
-                    field_2d = dset[self.plane_index, :, :]
-                elif self.normal == 'y':
-                    field_2d = dset[:, self.plane_index, :]
-                else:
-                    field_2d = dset[:, :, self.plane_index]
+            j2d = self.read_current_density_species(vname, tindex, "electron")
 
         # Ion
-        if smoothed_data:
-            fname = ("./" + dir_smooth_data + "/hydro_ion_" + str(tindex) +
-                     ".h5")
+        if turbulence_mixing:
+            jtmp = self.read_current_density_species(vname, tindex, "ionTop")
+            for var in j2d:
+                j2d[var] += jtmp[var]
+            jtmp = self.read_current_density_species(vname, tindex, "ionBot")
+            for var in j2d:
+                j2d[var] += jtmp[var]
         else:
-            if time_averaged_field:
-                fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
+            jtmp = self.read_current_density_species(vname, tindex, "ion")
+            for var in j2d:
+                j2d[var] += jtmp[var]
+
+        if vname == "absj":
+            field_2d = np.sqrt(j2d["jx"]**2 + j2d["jy"]**2 + j2d["jz"]**2)
+        else:
+            field_2d = j2d["jdir"]
+
+        return field_2d
+
+    def read_hydro_species(self, vname, tindex, species):
+        """Read the hydro data of one species
+
+        Args:
+            vname (string): variable name
+            tindex (int): time index
+            species (string): particle species
+        """
+        if vname in self.ehydro_list:
+            if smoothed_data:
+                fname = ("./" + dir_smooth_data + "/hydro_" + species + "_" +
+                         str(tindex) + ".h5")
             else:
-                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
-            fname = fdir + "hydro_ion_" + str(tindex) + ".h5"
+                if time_averaged_field:
+                    fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
+                else:
+                    fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+                fname = fdir + "hydro_" + species + "_" + str(tindex) + ".h5"
+        else:
+            if smoothed_data:
+                fname = ("./" + dir_smooth_data + "/hydro_" + species + "_" +
+                         str(tindex) + ".h5")
+            else:
+                if time_averaged_field:
+                    fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
+                else:
+                    fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+                fname = fdir + "hydro_" + species + "_" + str(tindex) + ".h5"
+
+        hydro = {}
+        keys = []
         with h5py.File(fname, 'r') as fh:
             group = fh["Timestep_" + str(tindex)]
-            if vname == "absj":
-                for var in ["jx", "jy", "jz"]:
-                    dset = group[var]
-                    if self.normal == 'x':
-                        j[var] += dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
-                        j[var] += dset[:, self.plane_index, :]
-                    else:
-                        j[var] += dset[:, :, self.plane_index]
-                field_2d = np.sqrt(j["jx"]**2 + j["jy"]**2 + j["jz"]**2)
-            else:
-                dset = group[vname]
-                if self.normal == 'x':
-                    field_2d += dset[self.plane_index, :, :]
-                elif self.normal == 'y':
-                    field_2d += dset[:, self.plane_index, :]
+            if vname[0] == "n":
+                keys.append("rho")
+            elif vname[0] == 'v':  # for velocity
+                keys.append("rho")
+                keys.append("j" + vname[-1])
+            elif vname[0] == 'u':  # for four-velocity
+                keys.append("rho")
+                keys.append("p" + vname[-1])
+            else:  # for pressure tensor
+                keys.append("rho")
+                keys.append("j" + vname[-2])
+                keys.append("p" + vname[-1])
+                vtmp = "t" + vname[2:]
+                if vtmp in group:
+                    keys.append(vtmp)
                 else:
-                    field_2d += dset[:, :, self.plane_index]
-        return field_2d
+                    keys.append("t" + vname[-1] + vname[-2])
+            for key in keys:
+                dset = group[key]
+                if self.normal == 'x':
+                    hydro[key] = dset[self.plane_index, :, :]
+                elif self.normal == 'y':
+                    hydro[key] = dset[:, self.plane_index, :]
+                else:
+                    hydro[key] = dset[:, :, self.plane_index]
+        return hydro
 
     def read_hydro(self, vname, tindex):
         """Read hydro data from file
@@ -791,89 +860,40 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             tindex (int): time index
         """
         if vname in self.ehydro_list:
-            if smoothed_data:
-                fname = ("./" + dir_smooth_data + "/hydro_electron_" +
-                         str(tindex) + ".h5")
-            else:
-                if time_averaged_field:
-                    fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
-                else:
-                    fdir = "./hydro_hdf5/T." + str(tindex) + "/"
-                fname = fdir + "hydro_electron_" + str(tindex) + ".h5"
             pmass = 1.0
+            if turbulence_mixing:
+                hydro = self.read_hydro_species(vname, tindex, "electronTop")
+                hydro_bot = self.read_hydro_species(vname, tindex,
+                                                    "electronBot")
+                for var in hydro:
+                    hydro[var] += hydro_bot[var]
+            else:
+                hydro = self.read_hydro_species(vname, tindex, "electron")
         else:
-            if smoothed_data:
-                fname = ("./" + dir_smooth_data + "/hydro_ion_" + str(tindex) +
-                         ".h5")
-            else:
-                if time_averaged_field:
-                    fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
-                else:
-                    fdir = "./hydro_hdf5/T." + str(tindex) + "/"
-                fname = fdir + "hydro_ion_" + str(tindex) + ".h5"
             pmass = vpic_info["mi/me"]
-        with h5py.File(fname, 'r') as fh:
-            group = fh["Timestep_" + str(tindex)]
-            if vname[0] == 'n':
-                var = "rho"
-            elif vname[0] == 'v':
-                var = "j" + vname[-1]
-            elif vname[0] == 'u':
-                var = "p" + vname[-1]
+            if turbulence_mixing:
+                hydro = self.read_hydro_species(vname, tindex, "ionTop")
+                hydro_bot = self.read_hydro_species(vname, tindex, "ionBot")
+                for var in hydro:
+                    hydro[var] += hydro_bot[var]
             else:
-                vtmp = "t" + vname[2:]
-                if vtmp in group:
-                    var = vtmp
-                else:
-                    var = "t" + vname[-1] + vname[-2]
-            dset = group[var]
-            if self.normal == 'x':
-                field_2d = dset[self.plane_index, :, :]
-            elif self.normal == 'y':
-                field_2d = dset[:, self.plane_index, :]
+                hydro = self.read_hydro_species(vname, tindex, "ion")
+
+        if vname[0] == 'n':  # number density
+            field_2d = np.abs(hydro["rho"])
+        elif vname[0] == 'v':  # velocity
+            field_2d = hydro["j" + vname[-1]] / hydro["rho"]
+        elif vname[0] == 'u':  # four-velocity
+            field_2d = hydro["p" + vname[-1]] / (pmass * np.abs(hydro["rho"]))
+        else:  # pressure tensor
+            vtmp = "t" + vname[2:]
+            if vtmp in hydro:
+                tvar = vtmp
             else:
-                field_2d = dset[:, :, self.plane_index]
-            if vname[0] == 'n':
-                field_2d = np.abs(field_2d)
-            elif vname[0] == 'v':
-                dset = group["rho"]
-                if self.normal == 'x':
-                    field_2d /= dset[self.plane_index, :, :]
-                elif self.normal == 'y':
-                    field_2d /= dset[:, self.plane_index, :]
-                else:
-                    field_2d /= dset[:, :, self.plane_index]
-            elif vname[0] == 'u':
-                dset = group["rho"]
-                if self.normal == 'x':
-                    field_2d /= np.abs(dset[self.plane_index, :, :])
-                elif self.normal == 'y':
-                    field_2d /= np.abs(dset[:, self.plane_index, :])
-                else:
-                    field_2d /= np.abs(dset[:, :, self.plane_index])
-                field_2d /= pmass
-            else:
-                dset = group["rho"]
-                if self.normal == 'x':
-                    rho = dset[self.plane_index, :, :]
-                elif self.normal == 'y':
-                    rho = dset[:, self.plane_index, :]
-                else:
-                    rho = dset[:, :, self.plane_index]
-                dset = group["j" + vname[-2]]
-                if self.normal == 'x':
-                    v = dset[self.plane_index, :, :] / rho
-                elif self.normal == 'y':
-                    v = dset[:, self.plane_index, :] / rho
-                else:
-                    v = dset[:, :, self.plane_index] / rho
-                dset = group["p" + vname[-1]]
-                if self.normal == 'x':
-                    field_2d -= v * dset[self.plane_index, :, :]
-                elif self.normal == 'y':
-                    field_2d -= v * dset[:, self.plane_index, :]
-                else:
-                    field_2d -= v * dset[:, :, self.plane_index]
+                tvar = "t" + vname[-1] + vname[-2]
+            jvar = "j" + vname[-2]
+            pvar = "p" + vname[-1]
+            field_2d = hydro[tvar] - (hydro[jvar] / hydro["rho"]) * hydro[pvar]
         return field_2d
 
     def get_jdote(self, tindex):
@@ -903,6 +923,17 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             field_3d += j2d * e3d
             return field_2d, field_3d
 
+    def electron_mixing_fraction(self, tindex):
+        """get the electron mixing fraction
+
+        (ne_bot - ne_top) / (ne_bot + ne_top)
+        """
+        ne_top = self.read_hydro_species("ne", tindex, "electronTop")
+        ne_bot = self.read_hydro_species("ne", tindex, "electronBot")
+        field_2d = (ne_bot["rho"] - ne_top["rho"]) / (ne_bot["rho"] +
+                                                      ne_top["rho"])
+        return field_2d, field_2d
+
     def read_data(self, vname, tindex):
         """Read data from file
 
@@ -913,6 +944,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if self.diag_plot:
             if self.diag_var_name == "jdotE":
                 self.field_2d, self.field_3d = self.get_jdote(tindex)
+            elif self.diag_var_name == "emix":
+                self.field_2d, self.field_3d = self.electron_mixing_fraction(
+                    tindex)
         else:
             if hdf5_fields:
                 if vname in self.fields_list:  # electric and magnetic fields
