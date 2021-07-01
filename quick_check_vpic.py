@@ -41,7 +41,7 @@ def get_vpic_info():
 
 vpic_info = get_vpic_info()
 hdf5_fields = True  # whether data is in HDF5 format
-smoothed_data = True  # whether data is smoothed
+smoothed_data = False  # whether data is smoothed
 if smoothed_data:
     smooth_factor = 24  # smooth factor along each direction
 else:
