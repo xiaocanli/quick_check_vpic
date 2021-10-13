@@ -40,17 +40,17 @@ def get_vpic_info():
 
 
 vpic_info = get_vpic_info()
-hdf5_fields = True  # whether data is in HDF5 format
-smoothed_data = False  # whether data is smoothed
+hdf5_fields = False  # whether data is in HDF5 format
+smoothed_data = True  # whether data is smoothed
 if smoothed_data:
-    smooth_factor = 24  # smooth factor along each direction
+    smooth_factor = 2  # smooth factor along each direction
 else:
     smooth_factor = 1
-dir_smooth_data = "data_smooth"
+dir_smooth_data = "data-smooth"
 momentum_field = True  # whether momentum and kinetic energy data are dumped
 time_averaged_field = False  # whether it is time-averaged field
 turbulence_mixing = False  # whether it has turbulence mixing diagnostics
-tmin, tmax = 0, 125
+tmin, tmax = 0, 40
 if time_averaged_field:
     tmin = 1
 animation_tinterval = 100  # in msec
@@ -142,7 +142,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         else:
             self.filetype_comboBox.setCurrentText("gda")
             if smoothed_data:
-                self.gda_path = dir_smooth_data
+                self.gda_path = dir_smooth_data + "/"
             else:
                 self.gda_path = "data/"
             self.tframe_loaded = -1
@@ -686,6 +686,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         self.tindex) + ".gda"
                     field_3d = np.fromfile(fname, dtype=np.float32,
                                            count=-1).reshape([nz, ny, nx])
+            else:
+                field_3d = self.field_3d
             self.tframe_loaded = self.tframe
             self.var_loaded = vname
             if self.normal == 'x':
