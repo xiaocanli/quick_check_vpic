@@ -11,6 +11,7 @@ import h5py
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.collections import LineCollection
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -40,13 +41,13 @@ def get_vpic_info():
 
 
 vpic_info = get_vpic_info()
-hdf5_fields = False  # whether data is in HDF5 format
+hdf5_fields = True  # whether data is in HDF5 format
 smoothed_data = True  # whether data is smoothed
 if smoothed_data:
-    smooth_factor = 2  # smooth factor along each direction
+    smooth_factor = 4  # smooth factor along each direction
 else:
     smooth_factor = 1
-dir_smooth_data = "data-smooth"
+dir_smooth_data = "data_smooth"
 momentum_field = True  # whether momentum and kinetic energy data are dumped
 time_averaged_field = False  # whether it is time-averaged field
 turbulence_mixing = False  # whether it has turbulence mixing diagnostics
@@ -55,6 +56,8 @@ if time_averaged_field:
     tmin = 1
 animation_tinterval = 100  # in msec
 nt = tmax - tmin + 1
+tracer_filepath = "/home/cannon/Research/quick_check_vpic/vpic-sorter/data/2D-Lx150-bg0.2-150ppc/"
+tracer_filename = "electrons_ntraj1000_10emax.h5p"
 
 
 def mkdir_p(path):
@@ -65,6 +68,116 @@ def mkdir_p(path):
             pass
         else:
             raise
+
+
+class TracerData():
+    def __init__(self, tracer_filepath="", tracer_filename=""):
+        self.tracer_filepath = tracer_filepath
+        self.tracer_filename = tracer_filename
+
+    def get_tracer_numbers(self):
+        """Get the number of tracers in the tracer file
+        """
+        self.file_to_read = self.tracer_filepath + self.tracer_filename
+        with h5py.File(self.file_to_read, "r") as fh:
+            self.ntracers = len(fh)
+
+    def get_tracer_tags(self):
+        """Get the tags of the tracers
+        """
+        self.tracer_tags = []
+        with h5py.File(self.file_to_read, "r") as fh:
+            for tag in fh:
+                self.tracer_tags.append(tag)
+
+    def read_tracer_data(self, tracer_tag, dt_tracer=1):
+        """Read tracer data
+        """
+        self.tracer_data = {}
+        with h5py.File(self.file_to_read, "r") as fh:
+            grp = fh[tracer_tag]
+            for dset in grp:
+                self.tracer_data[dset] = grp[dset][:]
+        nsteps = len(self.tracer_data["dX"])
+        self.tracer_data["t"] = np.arange(nsteps) * dt_tracer
+
+    def calc_tracer_energy(self):
+        """Calculate tracer energy (gamma - 1)
+        """
+        self.gamma = np.sqrt(self.tracer_data['Ux']**2 +
+                             self.tracer_data['Uy']**2 +
+                             self.tracer_data['Uz']**2 + 1)
+        self.kene = self.gamma - 1
+
+    def find_crossings(self, pos, length):
+        """find the crossings of the boundaries
+
+        Args:
+            pos: the position along one axis
+            length: the box size along that axis
+        """
+        crossings = []
+        offsets = []
+        offset = 0
+        nt, = pos.shape
+        for i in range(nt - 1):
+            if (pos[i] - pos[i + 1] > 0.1 * length):
+                crossings.append(i)
+                offset += length
+                offsets.append(offset)
+            if (pos[i] - pos[i + 1] < -0.1 * length):
+                crossings.append(i)
+                offset -= length
+                offsets.append(offset)
+        return (crossings, offsets)
+
+    def adjust_pos(self, pos, length):
+        """Adjust position for periodic boundary conditions
+
+        Args:
+            pos: the position along one axis
+            length: the box size along that axis
+        """
+        crossings, offsets = self.find_crossings(pos, length)
+        pos_b = np.copy(pos)
+        nc = len(crossings)
+        if nc > 0:
+            crossings = np.asarray(crossings)
+            offsets = np.asarray(offsets)
+            for i in range(nc - 1):
+                pos_b[crossings[i] + 1:crossings[i + 1] + 1] += offsets[i]
+            pos_b[crossings[nc - 1] + 1:] += offsets[nc - 1]
+        return pos_b
+
+    def adjust_tracer_pos(self):
+        """
+        """
+        self.tracer_adjusted = {}
+        self.tracer_adjusted["dX"] = self.adjust_pos(self.tracer_data['dX'],
+                                                     vpic_info["Lx/de"])
+        self.tracer_adjusted["dY"] = self.adjust_pos(self.tracer_data['dY'],
+                                                     vpic_info["Ly/de"])
+        self.tracer_adjusted["dZ"] = self.adjust_pos(self.tracer_data['dZ'],
+                                                     vpic_info["Lz/de"])
+
+    def exclude_boundary_segments(self, dim_h="x", dim_v="z"):
+        """Exclude boundary crossing segments
+
+        Args:
+            dim_h: horizontal dimension
+            dim_v: vertical dimension
+        """
+        hdata = self.tracer_data["d" + dim_h.upper()]
+        vdata = self.tracer_data["d" + dim_v.upper()]
+        lh_de = vpic_info["L" + dim_h + "/de"]
+        lv_de = vpic_info["L" + dim_v + "/de"]
+        crossings_h, _ = self.find_crossings(hdata, lh_de)
+        crossings_v, _ = self.find_crossings(vdata, lv_de)
+        crossings = np.unique(np.concatenate((crossings_h, crossings_v)))
+        crossings = crossings.astype(int)
+        points = np.array([hdata, vdata]).T.reshape((-1, 1, 2))
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        self.segments_wo_boundary = np.delete(segments, crossings, 0)
 
 
 class MplCanvas(FigureCanvasQTAgg):
@@ -116,6 +229,18 @@ class MplCanvas(FigureCanvasQTAgg):
             self.ax_main.tick_params(axis='x', labelbottom=False)
             self.ax1d = self.fig.add_subplot(spec[1, 0], sharex=self.ax_main)
             self.ax_cbar = self.fig.add_subplot(spec[0, 1])
+
+    def create_tracer_axes(self):
+        pos = np.asarray(self.ax_main.get_position()).flatten()
+        box_w = pos[2] - pos[0]
+        box_h = pos[3] - pos[1]
+        box_w1 = box_w * 0.4
+        box_h1 = box_h * 0.4
+        left = pos[0] + 0.05 * box_w
+        bottom = pos[3] - 0.05 * box_h - box_h1
+        rect = [left, bottom, box_w1, box_h1]
+        self.ax_tracer = self.fig.add_axes(rect)
+        self.ax_tracer.patch.set_alpha(0.6)
 
 
 class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
@@ -169,6 +294,15 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.diag_plot_variables()
         self.diagplot_comboBox.currentTextChanged.connect(
             self.diagplot_comboBox_vchange)
+
+        # Overplot variables
+        self.overplot_comboBox.setDisabled(True)
+        self.over_plot = False  # whether to overplot another variable
+        self.over_var_name = ""
+        self.over_plot_variables()
+        self.tracer_plot = None
+        self.overplot_comboBox.currentTextChanged.connect(
+            self.overplot_comboBox_vchange)
 
         # Create toolbar and canvas
         self.margin = 30
@@ -366,6 +500,15 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.fix_cbar_range = False
         self.cbar_checkBox.stateChanged.connect(self.cbar_checkBox_change)
 
+        # tracer particle index
+        self.tracer = TracerData(tracer_filepath, tracer_filename)
+        self.tracer_index_SpinBox.setMinimum(0)
+        self.tracer_index_SpinBox.setMaximum(100)
+        self.tracer_index_SpinBox.setKeyboardTracking(False)
+        self.tracer_index_SpinBox.valueChanged.connect(
+            self.tracer_index_SpinBox_vchange)
+        self.tracer_index = self.tracer_index_SpinBox.value()
+
     def plottype_comboBox_change(self, value):
         self.plot_type = value
         self.canvas.fig.clf()
@@ -377,6 +520,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.var_name = self.rawplot_comboBox.currentText()
             self.read_data(self.var_name, self.tindex)
             self.update_plot()
+        self.overplot_comboBox.setDisabled(False)
 
     def diagplot_comboBox_vchange(self, value):
         self.diag_var_name = self.diagplot_comboBox.currentText()
@@ -387,6 +531,38 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.update_plot()
         else:
             self.diag_plot = False
+            self.var_name = self.rawplot_comboBox.currentText()
+            self.read_data(self.var_name, self.tindex)
+            self.update_plot()
+        self.overplot_comboBox.setDisabled(False)
+
+    def overplot_comboBox_vchange(self, value):
+        self.over_var_name = self.overplot_comboBox.currentText()
+        if self.over_var_name in ["", "Ay"]:
+            self.over_plot = False
+            if self.tracer_plot:
+                self.tracer_plot.remove()
+                self.tracer_dot_plot.remove()
+                self.tracer_plot = None
+                self.canvas.ax_tracer.remove()
+                self.canvas.draw()
+        elif self.over_var_name == "trajectory":
+            self.over_plot = True
+            self.over_var_name = self.over_var_name
+            self.tracer.get_tracer_numbers()
+            self.tracer_index_SpinBox.setMaximum(self.tracer.ntracers)
+            self.tracer.get_tracer_tags()
+            self.tracer_index = self.tracer_index_SpinBox.value()
+            self.tracer_tag = self.tracer.tracer_tags[self.tracer_index]
+            self.dt_tracer = vpic_info["tracer_interval"] * vpic_info["dt*wpe"]
+            self.tracer.read_tracer_data(self.tracer_tag, self.dt_tracer)
+            self.tracer.calc_tracer_energy()
+            self.tracer.adjust_tracer_pos()
+            self.tracer.exclude_boundary_segments(self.hv[0], self.hv[1])
+            self.canvas.create_tracer_axes()
+            self.plot_tracer()
+        else:
+            self.over_plot = False
             self.var_name = self.rawplot_comboBox.currentText()
             self.read_data(self.var_name, self.tindex)
             self.update_plot()
@@ -609,6 +785,23 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.diagplot_comboBox.addItem("")
             self.diagplot_comboBox.setItemText(ivar,
                                                _translate("MainWindow", var))
+
+    def over_plot_variables(self):
+        self.over_var_list = ["", "Ay", "trajectory"]
+        _translate = QtCore.QCoreApplication.translate
+        for ivar, var in enumerate(self.over_var_list):
+            self.overplot_comboBox.addItem("")
+            self.overplot_comboBox.setItemText(ivar,
+                                               _translate("MainWindow", var))
+
+    def tracer_index_SpinBox_vchange(self, value):
+        self.tracer_index = value
+        self.tracer_tag = self.tracer.tracer_tags[self.tracer_index]
+        self.tracer.read_tracer_data(self.tracer_tag, self.dt_tracer)
+        self.tracer.calc_tracer_energy()
+        self.tracer.adjust_tracer_pos()
+        self.tracer.exclude_boundary_segments(self.hv[0], self.hv[1])
+        self.plot_tracer()
 
     def get_domain(self):
         """Get VPIC simulation domain
@@ -1047,6 +1240,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                         aspect='auto',
                                         origin='lower',
                                         interpolation='none')
+        if self.tracer_plot:
+            self.plot_tracer()
         self.canvas.ax_cbar.clear()
         self.canvas.fig.colorbar(im,
                                  cax=self.canvas.ax_cbar,
@@ -1103,6 +1298,51 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             mkdir_p(img_dir)
             fname = img_dir + self.var_name + "_" + str(self.tframe) + ".jpg"
             self.canvas.fig.savefig(fname)
+
+    def plot_tracer(self):
+        if self.tracer_plot:
+            self.tracer_plot.remove()
+            self.tracer_dot_plot.remove()
+            self.canvas.ax_tracer.clear()
+            self.canvas.ax_tracer.patch.set_alpha(0.6)
+        segments = self.tracer.segments_wo_boundary
+        norm = plt.Normalize(self.tracer.kene.min(), self.tracer.kene.max())
+        lc = LineCollection(segments, cmap='jet', norm=norm)
+        lc.set_array(self.tracer.kene)
+        lc.set_linewidth(2)
+        self.tracer_plot = self.canvas.ax_main.add_collection(lc)
+        # plot the current point
+        hdata = self.tracer.tracer_data["d" + self.hv[0].upper()]
+        vdata = self.tracer.tracer_data["d" + self.hv[1].upper()]
+        self.tindex_tracer = int(self.tindex / vpic_info["tracer_interval"])
+        if self.tindex_tracer > len(hdata):
+            self.tindex_tracer = len(hdata) - 1
+        self.tracer_dot_plot, = self.canvas.ax_main.plot(
+            hdata[self.tindex_tracer],
+            vdata[self.tindex_tracer],
+            markersize=10,
+            marker='o',
+            color='r')
+        # plot time vs. energy
+        ttracer = self.tracer.tracer_data["t"]
+        kene_tracer = self.tracer.kene
+        points = np.array([ttracer, kene_tracer]).T.reshape((-1, 1, 2))
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+        lc = LineCollection(segments, cmap='jet', norm=norm)
+        lc.set_array(kene_tracer)
+        lc.set_linewidth(1)
+        self.tracer_time_energy = self.canvas.ax_tracer.add_collection(lc)
+        self.canvas.ax_tracer.set_xlim([ttracer.min(), ttracer.max()])
+        ylim = [0, kene_tracer.max()]
+        twpe = self.tindex * vpic_info["dt*wpe"]
+        self.tracer_time_indicator, = self.canvas.ax_tracer.plot([twpe, twpe],
+                                                                 ylim,
+                                                                 linewidth=1,
+                                                                 color='k')
+        self.canvas.ax_tracer.set_ylim(ylim)
+        self.canvas.ax_tracer.set_xlabel(r"$t\omega_{pe}$", fontsize=12)
+        self.canvas.ax_tracer.set_ylabel(r"$\gamma - 1$", fontsize=12)
+        self.canvas.draw()
 
     def start_animation(self):
         self.timer = QtCore.QTimer()

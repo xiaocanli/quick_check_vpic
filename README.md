@@ -25,3 +25,4 @@ or use `python` instead if `python3` is in default. If you are interested in mod
 ```sh
 pyuic5 mainwindow.ui -o mainwindow.py
 ```
+For particle tracers, please modify `tracer_filepath` and `tracer_filename`. We assume that the tracer trajectories are saved in an HDF5 file, and each tracer particle data is saved in an individual group. The group name does not matter because it is not used in the code by default. Since the tracer trajectory is overplotted on the canvas, you need to plot a field image first. You can use the spinbox to select the tracer index.

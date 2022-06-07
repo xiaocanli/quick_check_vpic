@@ -20,7 +20,7 @@
       <x>31</x>
       <y>21</y>
       <width>1538</width>
-      <height>311</height>
+      <height>321</height>
      </rect>
     </property>
     <layout class="QHBoxLayout" name="horizontalLayout_32">
@@ -1105,6 +1105,77 @@
             </layout>
            </item>
            <item>
+            <layout class="QHBoxLayout" name="horizontalLayout_21">
+             <item>
+              <widget class="QLabel" name="label_18">
+               <property name="minimumSize">
+                <size>
+                 <width>0</width>
+                 <height>28</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>120</width>
+                 <height>16777215</height>
+                </size>
+               </property>
+               <property name="font">
+                <font>
+                 <family>Helvetica</family>
+                 <pointsize>12</pointsize>
+                 <weight>50</weight>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="text">
+                <string>Tracer Index</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QSpinBox" name="tracer_index_SpinBox">
+               <property name="minimumSize">
+                <size>
+                 <width>120</width>
+                 <height>0</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>150</width>
+                 <height>16777215</height>
+                </size>
+               </property>
+               <property name="font">
+                <font>
+                 <family>Helvetica</family>
+                 <pointsize>12</pointsize>
+                 <weight>50</weight>
+                 <bold>false</bold>
+                </font>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <spacer name="horizontalSpacer">
+               <property name="orientation">
+                <enum>Qt::Horizontal</enum>
+               </property>
+               <property name="sizeType">
+                <enum>QSizePolicy::Fixed</enum>
+               </property>
+               <property name="sizeHint" stdset="0">
+                <size>
+                 <width>320</width>
+                 <height>20</height>
+                </size>
+               </property>
+              </spacer>
+             </item>
+            </layout>
+           </item>
+           <item>
             <spacer name="verticalSpacer">
              <property name="orientation">
               <enum>Qt::Vertical</enum>
@@ -1147,7 +1218,7 @@
             <widget class="QPushButton" name="start_animateButton">
              <property name="minimumSize">
               <size>
-               <width>100</width>
+               <width>130</width>
                <height>30</height>
               </size>
              </property>
@@ -1168,7 +1239,7 @@
             <widget class="QPushButton" name="stop_animateButton">
              <property name="minimumSize">
               <size>
-               <width>100</width>
+               <width>130</width>
                <height>30</height>
               </size>
              </property>
@@ -1189,7 +1260,7 @@
             <widget class="QPushButton" name="continue_animateButton">
              <property name="minimumSize">
               <size>
-               <width>100</width>
+               <width>175</width>
                <height>30</height>
               </size>
              </property>
@@ -1481,11 +1552,11 @@
     </layout>
    </widget>
    <zorder>layoutWidget</zorder>
-   <zorder>cmap_checkBox</zorder>
-   <zorder>cmap_LineEdit</zorder>
-   <zorder>label_16</zorder>
-   <zorder></zorder>
-   <zorder>label_16</zorder>
+   <zorder>tracer_index_SpinBox</zorder>
+   <zorder>label_18</zorder>
+   <zorder>verticalSpacer</zorder>
+   <zorder>verticalSpacer</zorder>
+   <zorder>tracer_index_SpinBox</zorder>
    <zorder></zorder>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
