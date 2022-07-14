@@ -42,7 +42,7 @@ def get_vpic_info():
 
 vpic_info = get_vpic_info()
 hdf5_fields = True  # whether data is in HDF5 format
-smoothed_data = True  # whether data is smoothed
+smoothed_data = False  # whether data is smoothed
 if smoothed_data:
     smooth_factor = 4  # smooth factor along each direction
 else:
@@ -51,7 +51,7 @@ dir_smooth_data = "data_smooth"
 momentum_field = True  # whether momentum and kinetic energy data are dumped
 time_averaged_field = False  # whether it is time-averaged field
 turbulence_mixing = False  # whether it has turbulence mixing diagnostics
-tmin, tmax = 0, 40
+tmin, tmax = 0, 52
 if time_averaged_field:
     tmin = 1
 animation_tinterval = 100  # in msec
@@ -1249,7 +1249,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # 1D plot
         if self.plot_type == "Contour+" + self.hv[0].upper() + "-Average":
-            self.field_1d = np.sum(self.field_2d[ihs:ihe, :], axis=0)
+            self.field_1d = np.mean(self.field_2d[ihs:ihe, :], axis=0)
         elif self.plot_type == "Contour+" + self.hv[0].upper() + "-Slice":
             hslice = self.slice_dist[h + "slice_box"].value()
             ih_slice = int((hslice - self.vpic_domain[h + "min"]) /
