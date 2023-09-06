@@ -1,0 +1,29 @@
+[build-system]
+requires = ["flit_core >=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[project]
+name = "quick_check_vpic"
+version = "0.0.1"
+description = "A Quick Check of VPIC Data"
+authors = [
+  { name = "Xiaocan Li", email = "phyxiaolee@gmail.com" },
+]
+license = { file = "LICENSE" }
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.7"
+dependencies = [
+  "h5py>3",
+  "matplotlib>3.6",
+  "numpy>1.22",
+  "PyQt5>5.14",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/xiaocanli/quick_check_vpic"
+"Bug Tracker" = "https://github.com/xiaocanli/quick_check_vpic/issues"

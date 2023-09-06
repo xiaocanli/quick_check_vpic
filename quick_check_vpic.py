@@ -25,7 +25,7 @@ mpl.use('Qt5Agg')
 def get_vpic_info():
     """Get information of the VPIC simulation
     """
-    with open('./info') as f:
+    with open('../info') as f:
         content = f.readlines()
     f.close()
     vpic_info = {}
@@ -47,7 +47,7 @@ if smoothed_data:
     smooth_factor = 4  # smooth factor along each direction
 else:
     smooth_factor = 1
-dir_smooth_data = "data_smooth"
+dir_smooth_data = "../data_smooth"
 momentum_field = True  # whether momentum and kinetic energy data are dumped
 time_averaged_field = False  # whether it is time-averaged field
 turbulence_mixing = False  # whether it has turbulence mixing diagnostics
@@ -899,12 +899,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             tindex (int): time index
         """
         if smoothed_data:
-            fname = ("./" + dir_smooth_data + "/fields_" + str(tindex) + ".h5")
+            fname = ("../" + dir_smooth_data + "/fields_" + str(tindex) + ".h5")
         else:
             if time_averaged_field:
-                fdir = "./fields-avg-hdf5/T." + str(tindex) + "/"
+                fdir = "../fields-avg-hdf5/T." + str(tindex) + "/"
             else:
-                fdir = "./field_hdf5/T." + str(tindex) + "/"
+                fdir = "../field_hdf5/T." + str(tindex) + "/"
             fname = fdir + "fields_" + str(tindex) + ".h5"
         with h5py.File(fname, 'r') as fh:
             group = fh["Timestep_" + str(tindex)]
@@ -939,13 +939,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             species (string): particle species
         """
         if smoothed_data:
-            fname = ("./" + dir_smooth_data + "/hydro_" + species + "_" +
+            fname = ("../" + dir_smooth_data + "/hydro_" + species + "_" +
                      str(tindex) + ".h5")
         else:
             if time_averaged_field:
-                fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
+                fdir = "../hydro-avg-hdf5/T." + str(tindex) + "/"
             else:
-                fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+                fdir = "../hydro_hdf5/T." + str(tindex) + "/"
             fname = fdir + "hydro_" + species + "_" + str(tindex) + ".h5"
         j2d = {}
         with h5py.File(fname, 'r') as fh:
@@ -1017,23 +1017,23 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         """
         if vname in self.ehydro_list:
             if smoothed_data:
-                fname = ("./" + dir_smooth_data + "/hydro_" + species + "_" +
+                fname = ("../" + dir_smooth_data + "/hydro_" + species + "_" +
                          str(tindex) + ".h5")
             else:
                 if time_averaged_field:
-                    fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
+                    fdir = "../hydro-avg-hdf5/T." + str(tindex) + "/"
                 else:
-                    fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+                    fdir = "../hydro_hdf5/T." + str(tindex) + "/"
                 fname = fdir + "hydro_" + species + "_" + str(tindex) + ".h5"
         else:
             if smoothed_data:
-                fname = ("./" + dir_smooth_data + "/hydro_" + species + "_" +
+                fname = ("../" + dir_smooth_data + "/hydro_" + species + "_" +
                          str(tindex) + ".h5")
             else:
                 if time_averaged_field:
-                    fdir = "./hydro-avg-hdf5/T." + str(tindex) + "/"
+                    fdir = "../hydro-avg-hdf5/T." + str(tindex) + "/"
                 else:
-                    fdir = "./hydro_hdf5/T." + str(tindex) + "/"
+                    fdir = "../hydro_hdf5/T." + str(tindex) + "/"
                 fname = fdir + "hydro_" + species + "_" + str(tindex) + ".h5"
 
         hydro = {}
