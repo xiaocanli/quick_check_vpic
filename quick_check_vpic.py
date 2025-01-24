@@ -12,14 +12,14 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.collections import LineCollection
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
 from matplotlib.figure import Figure
-from PyQt5 import QtCore, QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 from mainwindow import Ui_MainWindow
 
-mpl.use('Qt5Agg')
+mpl.use('qtagg')
 
 
 def get_vpic_info():
@@ -41,13 +41,13 @@ def get_vpic_info():
 
 
 vpic_info = get_vpic_info()
-hdf5_fields = True  # whether data is in HDF5 format
-smoothed_data = False  # whether data is smoothed
+hdf5_fields = False  # whether data is in HDF5 format
+smoothed_data = True  # whether data is smoothed
 if smoothed_data:
-    smooth_factor = 4  # smooth factor along each direction
+    smooth_factor = 2  # smooth factor along each direction
 else:
     smooth_factor = 1
-dir_smooth_data = "../data_smooth"
+dir_smooth_data = "data-smooth"
 momentum_field = True  # whether momentum and kinetic energy data are dumped
 time_averaged_field = False  # whether it is time-averaged field
 turbulence_mixing = False  # whether it has turbulence mixing diagnostics
@@ -253,6 +253,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # check if the simulation is 2D
         self.coords = ["x", "y", "z"]
+        self.norms = {"z": 0, "y": 1, "x": 2}
         self.normal = "y"  # normal direction
         self.is_2d = False  # whether is a 2D simulation
         for c in self.coords:
@@ -267,9 +268,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         else:
             self.filetype_comboBox.setCurrentText("gda")
             if smoothed_data:
-                self.gda_path = dir_smooth_data + "/"
+                self.gda_path = "../" + dir_smooth_data + "/"
             else:
-                self.gda_path = "data/"
+                self.gda_path = "../data/"
             self.tframe_loaded = -1
             self.var_loaded = "random_var"
 
@@ -278,6 +279,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.auto_update = False
         self.autoplot_checkBox.stateChanged.connect(
             self.autoplot_checkBox_change)
+
+        # whether to integrate along normal direction
+        self.integrate_checkBox.setChecked(False)
+        self.integrate_normal = False
+        self.integrate_checkBox.stateChanged.connect(
+            self.integrate_checkBox_change)
 
         # plot type
         self.plottype_comboBox.currentTextChanged.connect(
@@ -456,6 +463,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # 2D plane
         if self.is_2d:
             self.plane_comboBox.setDisabled(True)
+            self.plane_hScrollBar.setDisabled(True)
+            self.plane_SpinBox.setDisabled(True)
         self.plane_comboBox.currentTextChanged.connect(
             self.plane_comboBox_vchange)
         self.plane_hScrollBar.sliderPressed.connect(
@@ -582,6 +591,18 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def autoplot_checkBox_change(self):
         self.auto_update = not self.auto_update
 
+    def integrate_checkBox_change(self):
+        self.integrate_normal = not self.integrate_normal
+        if self.integrate_normal:
+            self.plane_hScrollBar.setDisabled(True)
+            self.plane_SpinBox.setDisabled(True)
+        else:
+            if not self.is_2d:
+                self.plane_hScrollBar.setDisabled(False)
+                self.plane_SpinBox.setDisabled(False)
+        self.read_data(self.var_name, self.tindex)
+        self.update_plot()
+
     def tframe_hSlider_vchange(self, value):
         self.tframe_SpinBox.setValue(value)
         self.tframe = value
@@ -704,6 +725,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             2, "Contour+" + self.hv[0].upper() + "-Slice")
         self.plottype_comboBox.setItemText(
             3, "Contour+" + self.hv[1].upper() + "-Slice")
+        self.integrate_checkBox.setText("Integrate along " + self.normal.upper())
 
     def set_plane_index(self):
         plane_coord = self.plane_SpinBox.value()
@@ -910,24 +932,39 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             group = fh["Timestep_" + str(tindex)]
             if vname == "absb":
                 bvec = {}
-                for var in ["cbx", "cby", "cbz"]:
-                    dset = group[var]
-                    if self.normal == 'x':
-                        bvec[var] = dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
-                        bvec[var] = dset[:, self.plane_index, :]
-                    else:
-                        bvec[var] = dset[:, :, self.plane_index]
-                field_2d = np.sqrt(bvec["cbx"]**2 + bvec["cby"]**2 +
-                                   bvec["cbz"]**2)
+                if self.integrate_normal:
+                    dcell = self.vpic_domain["d" + self.normal]
+                    for var in ["cbx", "cby", "cbz"]:
+                        dset = group[var]
+                        bvec[var] = dset[:, :, :]
+                    field_2d = dcell * np.sum(np.sqrt(bvec["cbx"]**2 +
+                                                      bvec["cby"]**2 +
+                                                      bvec["cbz"]**2),
+                                              axis=self.norms[self.normal])
+                else:
+                    for var in ["cbx", "cby", "cbz"]:
+                        dset = group[var]
+                        if self.normal == 'x':
+                            bvec[var] = dset[self.plane_index, :, :]
+                        elif self.normal == 'y':
+                            bvec[var] = dset[:, self.plane_index, :]
+                        else:
+                            bvec[var] = dset[:, :, self.plane_index]
+                    field_2d = np.sqrt(bvec["cbx"]**2 + bvec["cby"]**2 +
+                                       bvec["cbz"]**2)
             else:
                 dset = group[vname]
-                if self.normal == 'x':
-                    field_2d = dset[self.plane_index, :, :]
-                elif self.normal == 'y':
-                    field_2d = dset[:, self.plane_index, :]
+                if self.integrate_normal:
+                    dcell = self.vpic_domain["d" + self.normal]
+                    field_2d = np.sum(dset[:, :, :],
+                                      axis=self.norms[self.normal])
                 else:
-                    field_2d = dset[:, :, self.plane_index]
+                    if self.normal == 'x':
+                        field_2d = dset[self.plane_index, :, :]
+                    elif self.normal == 'y':
+                        field_2d = dset[:, self.plane_index, :]
+                    else:
+                        field_2d = dset[:, :, self.plane_index]
         return field_2d
 
     def read_current_density_species(self, vname, tindex, species):
@@ -947,27 +984,35 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             else:
                 fdir = "../hydro_hdf5/T." + str(tindex) + "/"
             fname = fdir + "hydro_" + species + "_" + str(tindex) + ".h5"
-        j2d = {}
+        jsp = {}
         with h5py.File(fname, 'r') as fh:
             group = fh["Timestep_" + str(tindex)]
             if vname == "absj":
-                for var in ["jx", "jy", "jz"]:
-                    dset = group[var]
-                    if self.normal == 'x':
-                        j2d[var] = dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
-                        j2d[var] = dset[:, self.plane_index, :]
-                    else:
-                        j2d[var] = dset[:, :, self.plane_index]
+                if self.integrate_normal:
+                    for var in ["jx", "jy", "jz"]:
+                        dset = group[var]
+                        jsp[var] = dset[:, :, :]
+                else:
+                    for var in ["jx", "jy", "jz"]:
+                        dset = group[var]
+                        if self.normal == 'x':
+                            jsp[var] = dset[self.plane_index, :, :]
+                        elif self.normal == 'y':
+                            jsp[var] = dset[:, self.plane_index, :]
+                        else:
+                            jsp[var] = dset[:, :, self.plane_index]
             else:
                 dset = group[vname]
-                if self.normal == 'x':
-                    j2d["jdir"] = dset[self.plane_index, :, :]
-                elif self.normal == 'y':
-                    j2d["jdir"] = dset[:, self.plane_index, :]
+                if self.integrate_normal:
+                    jsp["jdir"] = dset[:, :, :]
                 else:
-                    j2d["jdir"] = dset[:, :, self.plane_index]
-        return j2d
+                    if self.normal == 'x':
+                        jsp["jdir"] = dset[self.plane_index, :, :]
+                    elif self.normal == 'y':
+                        jsp["jdir"] = dset[:, self.plane_index, :]
+                    else:
+                        jsp["jdir"] = dset[:, :, self.plane_index]
+        return jsp
 
     def read_current_density(self, vname, tindex):
         """read current density
@@ -978,32 +1023,42 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         """
         # Electron
         if turbulence_mixing:
-            j2d = self.read_current_density_species(vname, tindex,
+            jsp = self.read_current_density_species(vname, tindex,
                                                     "electronTop")
             jtmp = self.read_current_density_species(vname, tindex,
                                                      "electronBot")
-            for var in j2d:
-                j2d[var] += jtmp[var]
+            for var in jsp:
+                jsp[var] += jtmp[var]
         else:
-            j2d = self.read_current_density_species(vname, tindex, "electron")
+            jsp = self.read_current_density_species(vname, tindex, "electron")
 
         # Ion
         if turbulence_mixing:
             jtmp = self.read_current_density_species(vname, tindex, "ionTop")
-            for var in j2d:
-                j2d[var] += jtmp[var]
+            for var in jsp:
+                jsp[var] += jtmp[var]
             jtmp = self.read_current_density_species(vname, tindex, "ionBot")
-            for var in j2d:
-                j2d[var] += jtmp[var]
+            for var in jsp:
+                jsp[var] += jtmp[var]
         else:
             jtmp = self.read_current_density_species(vname, tindex, "ion")
-            for var in j2d:
-                j2d[var] += jtmp[var]
+            for var in jsp:
+                jsp[var] += jtmp[var]
 
-        if vname == "absj":
-            field_2d = np.sqrt(j2d["jx"]**2 + j2d["jy"]**2 + j2d["jz"]**2)
+        if self.integrate_normal:
+            dcell = self.vpic_domain["d" + self.normal]
+            if vname == "absj":
+                field_2d = np.sum(
+                        np.sqrt(jsp["jx"]**2 + jsp["jy"]**2 + jsp["jz"]**2),
+                        axis=self.norms[self.normal]) * dcell
+            else:
+                field_2d = np.sum(jsp["jdir"],
+                                  axis=self.norms[self.normal]) * dcell
         else:
-            field_2d = j2d["jdir"]
+            if vname == "absj":
+                field_2d = np.sqrt(jsp["jx"]**2 + jsp["jy"]**2 + jsp["jz"]**2)
+            else:
+                field_2d = jsp["jdir"]
 
         return field_2d
 
@@ -1057,14 +1112,20 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     keys.append(vtmp)
                 else:
                     keys.append("t" + vname[-1] + vname[-2])
-            for key in keys:
-                dset = group[key]
-                if self.normal == 'x':
-                    hydro[key] = dset[self.plane_index, :, :]
-                elif self.normal == 'y':
-                    hydro[key] = dset[:, self.plane_index, :]
-                else:
-                    hydro[key] = dset[:, :, self.plane_index]
+            if self.integrate_normal:
+                for key in keys:
+                    dset = group[key]
+                    hydro[key] = dset[:, :, :]
+            else:
+                for key in keys:
+                    dset = group[key]
+                    if self.normal == 'x':
+                        hydro[key] = dset[self.plane_index, :, :]
+                    elif self.normal == 'y':
+                        hydro[key] = dset[:, self.plane_index, :]
+                    else:
+                        hydro[key] = dset[:, :, self.plane_index]
+
         return hydro
 
     def read_hydro(self, vname, tindex):
@@ -1094,21 +1155,46 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             else:
                 hydro = self.read_hydro_species(vname, tindex, "ion")
 
-        if vname[0] == 'n':  # number density
-            field_2d = np.abs(hydro["rho"])
-        elif vname[0] == 'v':  # velocity
-            field_2d = hydro["j" + vname[-1]] / hydro["rho"]
-        elif vname[0] == 'u':  # four-velocity
-            field_2d = hydro["p" + vname[-1]] / (pmass * np.abs(hydro["rho"]))
-        else:  # pressure tensor
-            vtmp = "t" + vname[2:]
-            if vtmp in hydro:
-                tvar = vtmp
-            else:
-                tvar = "t" + vname[-1] + vname[-2]
-            jvar = "j" + vname[-2]
-            pvar = "p" + vname[-1]
-            field_2d = hydro[tvar] - (hydro[jvar] / hydro["rho"]) * hydro[pvar]
+        if self.integrate_normal:
+            if vname[0] == 'n':  # number density
+                field_2d = np.sum(np.abs(hydro["rho"]),
+                                  axis=self.norms[self.normal])
+            elif vname[0] == 'v':  # velocity
+                field_2d = np.sum(hydro["j" + vname[-1]] / hydro["rho"],
+                                  axis=self.norms[self.normal])
+            elif vname[0] == 'u':  # four-velocity
+                field_2d = np.sum(hydro["p" + vname[-1]] /
+                                  (pmass * np.abs(hydro["rho"])),
+                                  axis=self.norms[self.normal])
+            else:  # pressure tensor
+                vtmp = "t" + vname[2:]
+                if vtmp in hydro:
+                    tvar = vtmp
+                else:
+                    tvar = "t" + vname[-1] + vname[-2]
+                jvar = "j" + vname[-2]
+                pvar = "p" + vname[-1]
+                field_2d = np.sum(hydro[tvar] -
+                                  (hydro[jvar] / hydro["rho"]) * hydro[pvar],
+                                  axis=self.norms[self.normal])
+            dcell = self.vpic_domain["d" + self.normal]
+            field_2d *= dcell
+        else:
+            if vname[0] == 'n':  # number density
+                field_2d = np.abs(hydro["rho"])
+            elif vname[0] == 'v':  # velocity
+                field_2d = hydro["j" + vname[-1]] / hydro["rho"]
+            elif vname[0] == 'u':  # four-velocity
+                field_2d = hydro["p" + vname[-1]] / (pmass * np.abs(hydro["rho"]))
+            else:  # pressure tensor
+                vtmp = "t" + vname[2:]
+                if vtmp in hydro:
+                    tvar = vtmp
+                else:
+                    tvar = "t" + vname[-1] + vname[-2]
+                jvar = "j" + vname[-2]
+                pvar = "p" + vname[-1]
+                field_2d = hydro[tvar] - (hydro[jvar] / hydro["rho"]) * hydro[pvar]
         return field_2d
 
     def get_jdote(self, tindex):
@@ -1136,6 +1222,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             e2d, e3d = self.read_gda_file("ez", tindex)
             field_2d += j2d * e2d
             field_3d += j2d * e3d
+            if self.integrate_normal:
+                dcell = self.vpic_domain["d" + self.normal]
+                field_2d = dcell * np.sum(field_3d,
+                                          axis=self.norms[self.normal]).T
             return field_2d, field_3d
 
     def electron_mixing_fraction(self, tindex):
@@ -1173,6 +1263,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             else:
                 self.field_2d, self.field_3d = self.read_gda_file(
                     vname, tindex)
+                if self.integrate_normal:
+                    dcell = self.vpic_domain["d" + self.normal]
+                    self.field_2d = dcell * np.sum(self.field_3d,
+                                                   axis=self.norms[self.normal]).T
 
     def update_plot(self):
         if self.fix_cbar_range:
@@ -1378,7 +1472,7 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow()
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == '__main__':

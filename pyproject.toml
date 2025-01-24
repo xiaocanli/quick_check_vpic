@@ -4,7 +4,7 @@ build-backend = "flit_core.buildapi"
 
 [project]
 name = "quick_check_vpic"
-version = "0.0.1"
+version = "0.0.2"
 description = "A Quick Check of VPIC Data"
 authors = [
   { name = "Xiaocan Li", email = "phyxiaolee@gmail.com" },
@@ -21,7 +21,7 @@ dependencies = [
   "h5py>3",
   "matplotlib>3.6",
   "numpy>1.22",
-  "PyQt5>5.14",
+  "PySide6==6.4.3",
 ]
 
 [project.urls]
