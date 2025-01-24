@@ -253,7 +253,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         # check if the simulation is 2D
         self.coords = ["x", "y", "z"]
-        self.norms = {"z": 0, "y": 1, "x": 2}
+        self.norms_gda = {"z": 0, "y": 1, "x": 2}
+        self.norms_hdf5 = {"z": 0, "y": 1, "x": 2}
         self.normal = "y"  # normal direction
         self.is_2d = False  # whether is a 2D simulation
         for c in self.coords:
@@ -940,7 +941,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     field_2d = dcell * np.sum(np.sqrt(bvec["cbx"]**2 +
                                                       bvec["cby"]**2 +
                                                       bvec["cbz"]**2),
-                                              axis=self.norms[self.normal])
+                                              axis=self.norms_hdf5[self.normal])
                 else:
                     for var in ["cbx", "cby", "cbz"]:
                         dset = group[var]
@@ -956,8 +957,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 dset = group[vname]
                 if self.integrate_normal:
                     dcell = self.vpic_domain["d" + self.normal]
-                    field_2d = np.sum(dset[:, :, :],
-                                      axis=self.norms[self.normal])
+                    field_2d = dcell * np.sum(dset[:, :, :],
+                                              axis=self.norms_hdf5[self.normal])
                 else:
                     if self.normal == 'x':
                         field_2d = dset[self.plane_index, :, :]
@@ -1050,10 +1051,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             if vname == "absj":
                 field_2d = np.sum(
                         np.sqrt(jsp["jx"]**2 + jsp["jy"]**2 + jsp["jz"]**2),
-                        axis=self.norms[self.normal]) * dcell
+                        axis=self.norms_hdf5[self.normal]) * dcell
             else:
                 field_2d = np.sum(jsp["jdir"],
-                                  axis=self.norms[self.normal]) * dcell
+                                  axis=self.norms_hdf5[self.normal]) * dcell
         else:
             if vname == "absj":
                 field_2d = np.sqrt(jsp["jx"]**2 + jsp["jy"]**2 + jsp["jz"]**2)
@@ -1158,14 +1159,14 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if self.integrate_normal:
             if vname[0] == 'n':  # number density
                 field_2d = np.sum(np.abs(hydro["rho"]),
-                                  axis=self.norms[self.normal])
+                                  axis=self.norms_hdf5[self.normal])
             elif vname[0] == 'v':  # velocity
                 field_2d = np.sum(hydro["j" + vname[-1]] / hydro["rho"],
-                                  axis=self.norms[self.normal])
+                                  axis=self.norms_hdf5[self.normal])
             elif vname[0] == 'u':  # four-velocity
                 field_2d = np.sum(hydro["p" + vname[-1]] /
                                   (pmass * np.abs(hydro["rho"])),
-                                  axis=self.norms[self.normal])
+                                  axis=self.norms_hdf5[self.normal])
             else:  # pressure tensor
                 vtmp = "t" + vname[2:]
                 if vtmp in hydro:
@@ -1176,7 +1177,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 pvar = "p" + vname[-1]
                 field_2d = np.sum(hydro[tvar] -
                                   (hydro[jvar] / hydro["rho"]) * hydro[pvar],
-                                  axis=self.norms[self.normal])
+                                  axis=self.norms_hdf5[self.normal])
             dcell = self.vpic_domain["d" + self.normal]
             field_2d *= dcell
         else:
@@ -1225,7 +1226,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             if self.integrate_normal:
                 dcell = self.vpic_domain["d" + self.normal]
                 field_2d = dcell * np.sum(field_3d,
-                                          axis=self.norms[self.normal]).T
+                                          axis=self.norms_gda[self.normal]).T
             return field_2d, field_3d
 
     def electron_mixing_fraction(self, tindex):
@@ -1266,7 +1267,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 if self.integrate_normal:
                     dcell = self.vpic_domain["d" + self.normal]
                     self.field_2d = dcell * np.sum(self.field_3d,
-                                                   axis=self.norms[self.normal]).T
+                                                   axis=self.norms_gda[self.normal]).T
 
     def update_plot(self):
         if self.fix_cbar_range:
