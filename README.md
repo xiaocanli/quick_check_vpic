@@ -1,30 +1,380 @@
-# A Quick Check of VPIC Data
-The GUI program is called `quick_check_vpic.py`. It is similar to the IDL program `diagnostic.pro` but does not have that many functionalities. It works for both 2D and 3D runs, but more tests are needed to make sure that it works smoothly.
+# VPIC Quick Check
 
-## Usage
-In the VPIC run directory,
-```sh
+Interactive visualization tool for VPIC (Vector Particle-In-Cell) simulation data.
+
+## Features
+
+- **Interactive 2D/3D visualization** of electromagnetic fields, particle hydro quantities, and diagnostics
+- **Multiple plot types**: Contours, 1D slices, averages
+- **Animation** support for time series
+- **Tracer particle** visualization with energy evolution
+- **Flexible configuration** via YAML files or command-line arguments
+- **Auto-detection** of data format and file structure
+
+## Installation
+
+### Quick Install
+
+In the VPIC run directory:
+
+```bash
 git clone https://github.com/xiaocanli/quick_check_vpic
 cd quick_check_vpic
-module load python
-python -m pip install .
+pip install .
 ```
-It will install the required packages if they are already in the system.
 
-- On Perlmutter@NERSC, I recommend creating a conda environment and then installing the packages. Please follow the instructions at [nersc-python](https://docs.nersc.gov/development/languages/python/nersc-python/). You can use the GUI program through [NERSC NoMachine/NX](https://docs.nersc.gov/connect/nx/), which is much faster than directly launching it through ssh connection in the terminal.
+### Requirements
 
-You need to change a few parameters near the top of the program: `hdf5_fields`, `smoothed_data`, `smooth_factor`, `dir_smooth_data`, `momentum_field`, `time_averaged_field`, `turbulence_mixing`, `tmin`, `tmax`, and `animation_tinterval`. After making the changes, you can launch the GUI program in the simulation directory.
-```sh
-python3 quick_check_vpic.py
+```bash
+pip install numpy matplotlib h5py PySide6
 ```
-or use `python` instead if `python3` is in default.
+
+### Optional
+
+```bash
+pip install pyyaml  # For YAML configuration files
+```
+
+### Platform-Specific Notes
+
+**Perlmutter@NERSC**: Use a conda environment and access via [NERSC ThinLinc](https://docs.nersc.gov/connect/thinlinc/) for better performance. ThinLinc provides a remote desktop environment that is much faster than X11 forwarding over SSH. See [NERSC Python docs](https://docs.nersc.gov/development/languages/python/nersc-python/) for setting up your Python environment.
+
+## Quick Start
+
+### 1. Auto-Detection Mode (Easiest - **NEW!**)
+
+Simply run from your VPIC run directory:
+
+```bash
+cd /path/to/vpic/run/directory
+python quick_check_vpic.py
+```
+
+The tool will automatically:
+- Detect HDF5 vs GDA data format
+- Find smoothed data directories
+- Identify turbulence mixing simulations
+- Load the VPIC info file
+
+### 2. Using Configuration Files (**NEW!**)
+
+Create a `config.yaml` file (copy from `config_example.yaml`):
+
+```yaml
+# config.yaml
+data:
+  hdf5_fields: true
+  smoothed_data: true
+  smooth_factor: 2
+
+time:
+  tmin: 0
+  tmax: 100
+```
+
+Then run:
+
+```bash
+python quick_check_vpic.py --config config.yaml
+```
+
+### 3. Command-Line Arguments (**NEW!**)
+
+Override settings directly:
+
+```bash
+# Use HDF5 format, time range 10-50
+python quick_check_vpic.py --hdf5 --tmin 10 --tmax 50
+
+# Use GDA format without smoothing
+python quick_check_vpic.py --gda --no-smooth
+```
+
+## Configuration
+
+### Configuration Priority (**NEW!**)
+
+Settings are applied in this order (later overrides earlier):
+
+1. Default values
+2. Auto-detected settings
+3. `config_example.yaml` (if present)
+4. `config.yaml` (if present)
+5. Specified config file (`--config`)
+6. Command-line arguments
+
+### Configuration Options
+
+Create `config.yaml` in your quick_check_vpic directory:
+
+```yaml
+# Data format and location
+data:
+  hdf5_fields: true          # true for HDF5, false for GDA
+  smoothed_data: true        # Use smoothed data
+  smooth_factor: 2           # Smoothing factor (if smoothed)
+  dir_smooth_data: "data_smooth"  # Smoothed data directory
+  dir_fields_hdf5: "field_hdf5"   # Field directory: "field_hdf5" (old VPIC) or "fields_hdf5" (new VPIC)
+  hdf5_data_order: "xyz"     # HDF5 data organization: "xyz" (older VPIC) or "zyx" (newer VPIC)
+  momentum_field: true       # Momentum data available
+  time_averaged_field: false # Time-averaged fields
+  turbulence_mixing: false   # Turbulence mixing simulation
+
+# Time parameters
+time:
+  tmin: 0                    # Start frame
+  tmax: 52                   # End frame
+  animation_tinterval: 100   # Animation interval (ms)
+
+# Tracer particles
+tracer:
+  filepath: "/path/to/tracer/data/"
+  filename: "electrons_ntraj1000_10emax.h5p"
+
+# VPIC simulation info file
+info_file: "../info"         # Path to VPIC info file
+```
+
+## Usage Guide
+
+### Main Window
+
+The main window provides:
+
+- **Variable selection**: Choose electromagnetic fields, hydro quantities, or diagnostics
+- **Plot type**: Contour, contour+slice, contour+average
+- **Time control**: Slider and spinbox for frame selection
+- **Spatial range**: X, Y, Z range selectors
+- **Animation**: Play through time series with optional JPEG saving
+
+### Plot Types
+
+1. **Contour**: 2D color map of selected variable
+2. **Contour + X/Y/Z Average**: 2D map with averaged 1D profile
+3. **Contour + X/Y/Z Slice**: 2D map with 1D slice at specified position
+
+### Controls
+
+- **Time Frame**: Navigate through simulation timesteps
+- **X/Y/Z Min/Max**: Set spatial extent to visualize
+- **Plane**: Select normal direction for 2D slicing (3D sims only)
+- **Auto-update**: Automatically refresh plot when parameters change
+- **Integrate**: Integrate along normal direction
+- **Fix colormap/colorbar**: Lock color scheme and range
+
+### Tracer Particles
+
+Tracer trajectories are assumed to be in HDF5 format with each tracer in an individual group.
+
+1. Plot a field image first
+2. Select "trajectory" from the overplot dropdown
+3. Choose tracer index with spinbox
+4. Visualize particle trajectory colored by energy
+5. Inset plot shows energy vs time
+
+Configure tracer paths in `config.yaml` or set `tracer_filepath` and `tracer_filename` in the code.
+
+### Animation
+
+1. Click "Start Animation" to play through time
+2. Optionally enable "Save JPEGs" to export frames to `./img/`
+3. Use "Stop" and "Continue" to control playback
+
+## Command-Line Reference (**NEW!**)
+
+```
+usage: quick_check_vpic.py [-h] [-c CONFIG] [--info-file INFO_FILE]
+                           [--hdf5] [--gda] [--smooth] [--no-smooth]
+                           [--tmin TMIN] [--tmax TMAX] [--no-auto-detect]
+
+Options:
+  -h, --help            Show help message
+  -c, --config CONFIG   Path to YAML configuration file
+  --info-file INFO_FILE Path to VPIC info file (default: ../info)
+  --hdf5                Force HDF5 field format
+  --gda                 Force GDA field format
+  --smooth              Force smoothed data mode
+  --no-smooth           Force non-smoothed data mode
+  --tmin TMIN           Minimum time frame
+  --tmax TMAX           Maximum time frame
+  --no-auto-detect      Disable auto-detection
+```
+
+## File Structure
+
+Expected directory structure (from run directory):
+
+```
+run_directory/
+├── info                    # VPIC simulation info
+├── field_hdf5/            # HDF5 fields (old VPIC) or
+├── fields_hdf5/           # HDF5 fields (new VPIC) or
+├── data/                  # GDA fields
+├── data_smooth/           # Smoothed data (optional)
+├── hydro_hdf5/            # Hydro data
+└── quick_check_vpic/      # This tool
+    ├── quick_check_vpic.py
+    ├── mainwindow.py
+    ├── mainwindow.ui
+    ├── config.yaml        # Your config (optional)
+    └── config_example.yaml
+```
+
+## Troubleshooting
+
+### "VPIC info file not found"
+
+Ensure `../info` exists relative to where you run the script, or specify:
+
+```bash
+python quick_check_vpic.py --info-file /path/to/info
+```
+
+### "Auto-detected: HDF5 field format" but you have GDA
+
+Override with:
+
+```bash
+python quick_check_vpic.py --gda
+```
+
+### Plots not updating when moving sliders
+
+1. Enable "Auto-update" checkbox
+2. Click "Plot" button after adjusting parameters
+
+### Array dimension mismatch
+
+This can happen with:
+
+1. **Smoothed data**: Verify `smooth_factor` matches your data:
+   ```bash
+   python quick_check_vpic.py --smooth-factor 2
+   ```
+   Or disable smoothing:
+   ```bash
+   python quick_check_vpic.py --no-smooth
+   ```
+
+2. **Wrong HDF5 data order**: Newer VPIC versions organize data as (nz, ny, nx) instead of (nx, ny, nz).
+   Update your `config.yaml`:
+   ```yaml
+   data:
+     hdf5_data_order: "zyx"  # For newer VPIC versions
+   ```
+   Or use "xyz" for older versions (default)
+
+### Missing PyYAML warning
+
+Install PyYAML for config file support:
+
+```bash
+pip install pyyaml
+```
+
+The tool will still work with auto-detection or command-line args.
+
+## Examples
+
+### Example 1: Quick visualization with auto-detection
+
+```bash
+cd my_vpic_run
+python quick_check_vpic/quick_check_vpic.py
+# Select variable (e.g., "ex")
+# Click "Start Animation"
+```
+
+### Example 2: Analyze specific time range
+
+```bash
+python quick_check_vpic.py --tmin 50 --tmax 100
+```
+
+### Example 3: Compare smoothed vs raw data
+
+```bash
+# Terminal 1: Smoothed
+python quick_check_vpic.py --smooth
+
+# Terminal 2: Raw
+python quick_check_vpic.py --no-smooth
+```
+
+### Example 4: Custom configuration for production runs
+
+Create `production_config.yaml`:
+```yaml
+data:
+  hdf5_fields: true
+  smoothed_data: true
+  smooth_factor: 4
+time:
+  tmin: 0
+  tmax: 500
+```
+
+Then:
+```bash
+python quick_check_vpic.py -c production_config.yaml
+```
 
 ## Customization
-If you are interested in modifying it, the layout `mainwindow.ui` is created using Qt Creator, which is free to use. You need to convert it to a Python file before using it in the GUI program.
-```sh
+
+### Modifying the GUI
+
+The layout `mainwindow.ui` is created using Qt Creator (free). To modify:
+
+1. Edit `mainwindow.ui` in Qt Creator
+2. Convert to Python:
+```bash
 pyside6-uic mainwindow.ui -o mainwindow.py
 ```
-For particle tracers, please modify `tracer_filepath` and `tracer_filename`. We assume that the tracer trajectories are saved in an HDF5 file, and each tracer particle data is saved in an individual group. The group name does not matter because it is not used in the code by default. Since the tracer trajectory is overplotted on the canvas, you need to plot a field image first. You can use the spinbox to select the tracer index.
+
+### Adding New Variables
+
+To add new variables or diagnostics:
+
+1. `raw_plot_variables()`: Add to variable lists
+2. `read_data()`: Add data reading logic if needed
+3. `diag_plot_variables()`: For new diagnostics
+
+## Development
+
+### Code Structure
+
+- `Config`: Configuration dataclass with YAML loading and auto-detection
+- `load_config()`: Configuration loading with fallback chain
+- `TracerData`: Tracer particle data management
+- `MplCanvas`: Matplotlib Qt integration
+- `MainWindow`: Main GUI and visualization logic
+
+### Recent Improvements (v2.0)
+
+- **Configuration system**: YAML files + command-line arguments
+- **Auto-detection**: Automatically detect data format and structure
+- **Better error handling**: Clearer error messages
+- **Type hints**: Full type annotations for better IDE support
+- **Bug fixes**: Fixed array dimension mismatches for smoothed data
+
+## Tips
+
+1. **First time**: Use auto-detection to see what the tool finds
+2. **Save config**: Once you find good settings, save to `config.yaml`
+3. **Quick tests**: Use command-line args for one-off changes
+4. **Animation**: Disable auto-update during animation for better performance
+5. **Large datasets**: Use spatial range selectors to focus on regions of interest
 
 ## Issues
-Please submit issues if you find problems or directly contact me for help.
+
+Please submit issues on GitHub or contact the maintainer:
+- GitHub: https://github.com/xiaocanli/quick_check_vpic/issues
+
+## Version History
+
+- **v2.0**: Refactored with configuration system, auto-detection, type hints, and bug fixes
+- **v1.x**: Original implementation
+
+---
+
+**Note**: This tool is designed for quick visualization and analysis. For publication-quality figures or detailed analysis, consider using dedicated analysis scripts.

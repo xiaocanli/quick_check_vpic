@@ -1,0 +1,28 @@
+# VPIC Quick Check Configuration File
+# Copy this file to 'config.yaml' and adjust settings as needed
+
+# Data format and location
+data:
+  hdf5_fields: true          # true for HDF5 format, false for GDA format
+  smoothed_data: true        # Whether data is smoothed
+  smooth_factor: 2           # Smooth factor along each direction (only used if smoothed_data is true)
+  dir_smooth_data: "data_smooth"  # Directory name for smoothed data
+  dir_fields_hdf5: "field_hdf5"   # Field directory name: "field_hdf5" (old) or "fields_hdf5" (new)
+  hdf5_data_order: "xyz"     # HDF5 data organization: "xyz" (older VPIC) or "zyx" (newer VPIC)
+  momentum_field: true       # Whether momentum and kinetic energy data are dumped
+  time_averaged_field: false # Whether it is time-averaged field
+  turbulence_mixing: false   # Whether it has turbulence mixing diagnostics
+
+# Time parameters
+time:
+  tmin: 0                    # Minimum time frame
+  tmax: 52                   # Maximum time frame
+  animation_tinterval: 100   # Animation interval in milliseconds
+
+# Tracer particle settings
+tracer:
+  filepath: "/home/cannon/Research/quick_check_vpic/vpic-sorter/data/2D-Lx150-bg0.2-150ppc/"
+  filename: "electrons_ntraj1000_10emax.h5p"
+
+# VPIC simulation info file
+info_file: "../info"         # Path to VPIC info file (relative to working directory)

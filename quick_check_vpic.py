@@ -2,10 +2,14 @@
 """
 Quick check of VPIC output
 """
+import argparse
 import errno
 import math
 import os
 import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import h5py
 import matplotlib as mpl
@@ -21,77 +25,297 @@ from mainwindow import Ui_MainWindow
 
 mpl.use('qtagg')
 
+try:
+    import yaml
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+    print("Warning: PyYAML not installed. Using default configuration.")
+    print("Install with: pip install pyyaml")
 
-def get_vpic_info():
-    """Get information of the VPIC simulation
+
+def get_vpic_info(info_file: str = '../info') -> Dict[str, float]:
+    """Get information of the VPIC simulation from the info file.
+
+    Args:
+        info_file: Path to the VPIC info file
+
+    Returns:
+        Dictionary containing VPIC simulation parameters
+
+    Raises:
+        FileNotFoundError: If info file doesn't exist
+        ValueError: If info file format is invalid
     """
-    with open('../info') as f:
-        content = f.readlines()
-    f.close()
+    info_path = Path(info_file)
+    if not info_path.exists():
+        raise FileNotFoundError(
+            f"VPIC info file not found: {info_file}\n"
+            f"Please ensure the info file exists or specify the correct path."
+        )
+
+    try:
+        with open(info_path) as f:
+            content = f.readlines()
+    except Exception as e:
+        raise ValueError(f"Failed to read info file {info_file}: {e}")
+
+    if len(content) < 2:
+        raise ValueError(f"Info file {info_file} appears to be empty or invalid")
+
     vpic_info = {}
     for line in content[1:]:
         if "=" in line:
             line_splits = line.split("=")
         elif ":" in line:
             line_splits = line.split(":")
+        else:
+            continue
 
-        tail = line_splits[1].split("\n")
-        vpic_info[line_splits[0].strip()] = float(tail[0])
+        try:
+            tail = line_splits[1].split("\n")
+            vpic_info[line_splits[0].strip()] = float(tail[0])
+        except (IndexError, ValueError) as e:
+            print(f"Warning: Could not parse line in info file: {line.strip()}")
+            continue
+
     return vpic_info
 
 
-vpic_info = get_vpic_info()
-hdf5_fields = False  # whether data is in HDF5 format
-smoothed_data = True  # whether data is smoothed
-if smoothed_data:
-    smooth_factor = 2  # smooth factor along each direction
-else:
-    smooth_factor = 1
-dir_smooth_data = "data-smooth"
-momentum_field = True  # whether momentum and kinetic energy data are dumped
-time_averaged_field = False  # whether it is time-averaged field
-turbulence_mixing = False  # whether it has turbulence mixing diagnostics
-tmin, tmax = 0, 52
-if time_averaged_field:
-    tmin = 1
-animation_tinterval = 100  # in msec
-nt = tmax - tmin + 1
-tracer_filepath = "/home/cannon/Research/quick_check_vpic/vpic-sorter/data/2D-Lx150-bg0.2-150ppc/"
-tracer_filename = "electrons_ntraj1000_10emax.h5p"
+def mkdir_p(path: str) -> None:
+    """Create directory with parents, ignore if exists.
 
-
-def mkdir_p(path):
+    Args:
+        path: Directory path to create
+    """
     try:
         os.makedirs(path)
-    except OSError as exc:  # Python >2.5
+    except OSError as exc:
         if exc.errno == errno.EEXIST and os.path.isdir(path):
             pass
         else:
             raise
 
 
-class TracerData():
-    def __init__(self, tracer_filepath="", tracer_filename=""):
+@dataclass
+class Config:
+    """Configuration parameters for VPIC visualization."""
+
+    vpic_info: Dict[str, float] = field(default_factory=dict)
+    info_file: str = "../info"
+    hdf5_fields: bool = True
+    smoothed_data: bool = True
+    smooth_factor: int = 2
+    dir_smooth_data: str = "data_smooth"
+    dir_fields_hdf5: str = "field_hdf5"  # Field directory name (field_hdf5 or fields_hdf5)
+    hdf5_data_order: str = "xyz"  # HDF5 data order: "xyz" (old) or "zyx" (new)
+    momentum_field: bool = True
+    time_averaged_field: bool = False
+    turbulence_mixing: bool = False
+    tmin: int = 0
+    tmax: int = 52
+    animation_tinterval: int = 100
+    tracer_filepath: str = "/home/cannon/Research/quick_check_vpic/vpic-sorter/data/2D-Lx150-bg0.2-150ppc/"
+    tracer_filename: str = "electrons_ntraj1000_10emax.h5p"
+
+    def __post_init__(self):
+        """Adjust configuration based on settings."""
+        if not self.smoothed_data:
+            self.smooth_factor = 1
+        if self.time_averaged_field and self.tmin == 0:
+            self.tmin = 1
+        self.nt = self.tmax - self.tmin + 1
+
+        # Load vpic_info if not already loaded
+        if not self.vpic_info:
+            try:
+                self.vpic_info = get_vpic_info(self.info_file)
+            except FileNotFoundError as e:
+                print(f"Error: {e}")
+                print("Using empty vpic_info. Some features may not work correctly.")
+                self.vpic_info = {}
+
+    @classmethod
+    def from_yaml(cls, yaml_path: str) -> 'Config':
+        """Load configuration from YAML file.
+
+        Args:
+            yaml_path: Path to YAML configuration file
+
+        Returns:
+            Config instance
+        """
+        if not HAS_YAML:
+            print(f"Cannot load {yaml_path}: PyYAML not installed")
+            return cls()
+
+        yaml_file = Path(yaml_path)
+        if not yaml_file.exists():
+            print(f"Config file not found: {yaml_path}")
+            return cls()
+
+        try:
+            with open(yaml_file) as f:
+                config_data = yaml.safe_load(f)
+
+            # Flatten nested structure
+            flat_config = {}
+            if 'data' in config_data:
+                flat_config.update(config_data['data'])
+            if 'time' in config_data:
+                flat_config.update(config_data['time'])
+            if 'tracer' in config_data:
+                tracer = config_data['tracer']
+                flat_config['tracer_filepath'] = tracer.get('filepath', cls.tracer_filepath)
+                flat_config['tracer_filename'] = tracer.get('filename', cls.tracer_filename)
+            if 'info_file' in config_data:
+                flat_config['info_file'] = config_data['info_file']
+
+            return cls(**flat_config)
+        except Exception as e:
+            print(f"Error loading config from {yaml_path}: {e}")
+            print("Using default configuration")
+            return cls()
+
+    @classmethod
+    def auto_detect(cls, info_file: str = '../info') -> 'Config':
+        """Auto-detect configuration from available files.
+
+        Args:
+            info_file: Path to VPIC info file
+
+        Returns:
+            Config instance with auto-detected settings
+        """
+        config_dict = {'info_file': info_file}
+
+        # Auto-detect HDF5 vs GDA format and field directory name
+        if Path('../fields_hdf5').exists():
+            config_dict['hdf5_fields'] = True
+            config_dict['dir_fields_hdf5'] = 'fields_hdf5'
+            print("Auto-detected: HDF5 field format (fields_hdf5/)")
+        elif Path('../field_hdf5').exists():
+            config_dict['hdf5_fields'] = True
+            config_dict['dir_fields_hdf5'] = 'field_hdf5'
+            print("Auto-detected: HDF5 field format (field_hdf5/)")
+        elif Path('../fields-avg-hdf5').exists():
+            config_dict['hdf5_fields'] = True
+            config_dict['dir_fields_hdf5'] = 'fields-avg-hdf5'
+            print("Auto-detected: HDF5 field format (fields-avg-hdf5/)")
+        elif Path('../data').exists():
+            config_dict['hdf5_fields'] = False
+            print("Auto-detected: GDA field format")
+
+        # Auto-detect smoothed data
+        if Path('../data_smooth').exists() or Path('../data-smooth').exists():
+            config_dict['smoothed_data'] = True
+            if Path('../data_smooth').exists():
+                config_dict['dir_smooth_data'] = 'data_smooth'
+            else:
+                config_dict['dir_smooth_data'] = 'data-smooth'
+            print(f"Auto-detected: Smoothed data in {config_dict['dir_smooth_data']}/")
+        else:
+            config_dict['smoothed_data'] = False
+
+        # Auto-detect turbulence mixing
+        if Path('../hydro_hdf5').exists():
+            # Check for turbulence mixing species
+            hydro_dirs = list(Path('../hydro_hdf5').glob('T.*'))
+            if hydro_dirs:
+                sample_files = list(hydro_dirs[0].glob('hydro_*_*.h5'))
+                species_names = [f.stem.split('_')[1] for f in sample_files]
+                if any('Top' in s or 'Bot' in s for s in species_names):
+                    config_dict['turbulence_mixing'] = True
+                    print("Auto-detected: Turbulence mixing simulation")
+
+        return cls(**config_dict)
+
+
+def load_config(config_file: Optional[str] = None, auto_detect: bool = True) -> Config:
+    """Load configuration with fallback chain.
+
+    Priority order:
+    1. Specified config file (if provided)
+    2. config.yaml in current directory
+    3. config_example.yaml
+    4. Auto-detection (if enabled)
+    5. Default values
+
+    Args:
+        config_file: Optional path to config file
+        auto_detect: Whether to auto-detect settings from file system
+
+    Returns:
+        Config instance
+    """
+    # Try specified config file first
+    if config_file and Path(config_file).exists():
+        print(f"Loading configuration from: {config_file}")
+        return Config.from_yaml(config_file)
+
+    # Try config.yaml
+    if Path('config.yaml').exists():
+        print("Loading configuration from: config.yaml")
+        return Config.from_yaml('config.yaml')
+
+    # Try config_example.yaml
+    if Path('config_example.yaml').exists():
+        print("Loading configuration from: config_example.yaml")
+        return Config.from_yaml('config_example.yaml')
+
+    # Try auto-detection
+    if auto_detect:
+        print("Auto-detecting configuration...")
+        return Config.auto_detect()
+
+    # Use defaults
+    print("Using default configuration")
+    return Config()
+
+
+# Global configuration instance - will be initialized in main()
+config: Optional[Config] = None
+
+
+class TracerData:
+    """Handle tracer particle data reading and processing."""
+
+    def __init__(self, tracer_filepath: str = "", tracer_filename: str = ""):
+        """Initialize tracer data handler.
+
+        Args:
+            tracer_filepath: Path to tracer data directory
+            tracer_filename: Name of tracer data file
+        """
         self.tracer_filepath = tracer_filepath
         self.tracer_filename = tracer_filename
+        self.file_to_read = ""
+        self.ntracers = 0
+        self.tracer_tags: List[str] = []
+        self.tracer_data: Dict[str, np.ndarray] = {}
+        self.tracer_adjusted: Dict[str, np.ndarray] = {}
+        self.gamma: Optional[np.ndarray] = None
+        self.kene: Optional[np.ndarray] = None
+        self.segments_wo_boundary: Optional[np.ndarray] = None
 
-    def get_tracer_numbers(self):
-        """Get the number of tracers in the tracer file
-        """
+    def get_tracer_numbers(self) -> None:
+        """Get the number of tracers in the tracer file."""
         self.file_to_read = self.tracer_filepath + self.tracer_filename
         with h5py.File(self.file_to_read, "r") as fh:
             self.ntracers = len(fh)
 
-    def get_tracer_tags(self):
-        """Get the tags of the tracers
-        """
+    def get_tracer_tags(self) -> None:
+        """Get the tags of the tracers."""
         self.tracer_tags = []
         with h5py.File(self.file_to_read, "r") as fh:
-            for tag in fh:
-                self.tracer_tags.append(tag)
+            self.tracer_tags = list(fh.keys())
 
-    def read_tracer_data(self, tracer_tag, dt_tracer=1):
-        """Read tracer data
+    def read_tracer_data(self, tracer_tag: str, dt_tracer: float = 1.0) -> None:
+        """Read tracer data from file.
+
+        Args:
+            tracer_tag: Tag identifying the tracer
+            dt_tracer: Time step for tracer data
         """
         self.tracer_data = {}
         with h5py.File(self.file_to_read, "r") as fh:
@@ -101,136 +325,175 @@ class TracerData():
         nsteps = len(self.tracer_data["dX"])
         self.tracer_data["t"] = np.arange(nsteps) * dt_tracer
 
-    def calc_tracer_energy(self):
-        """Calculate tracer energy (gamma - 1)
-        """
-        self.gamma = np.sqrt(self.tracer_data['Ux']**2 +
-                             self.tracer_data['Uy']**2 +
-                             self.tracer_data['Uz']**2 + 1)
+    def calc_tracer_energy(self) -> None:
+        """Calculate tracer kinetic energy (gamma - 1)."""
+        self.gamma = np.sqrt(
+            self.tracer_data['Ux']**2 +
+            self.tracer_data['Uy']**2 +
+            self.tracer_data['Uz']**2 + 1
+        )
         self.kene = self.gamma - 1
 
-    def find_crossings(self, pos, length):
-        """find the crossings of the boundaries
+    def find_crossings(self, pos: np.ndarray, length: float) -> Tuple[List[int], List[float]]:
+        """Find the crossings of periodic boundaries.
 
         Args:
-            pos: the position along one axis
-            length: the box size along that axis
+            pos: Position array along one axis
+            length: Box size along that axis
+
+        Returns:
+            Tuple of (crossing indices, position offsets)
         """
         crossings = []
         offsets = []
-        offset = 0
-        nt, = pos.shape
+        offset = 0.0
+        nt = pos.shape[0]
+
         for i in range(nt - 1):
-            if (pos[i] - pos[i + 1] > 0.1 * length):
+            if pos[i] - pos[i + 1] > 0.1 * length:
                 crossings.append(i)
                 offset += length
                 offsets.append(offset)
-            if (pos[i] - pos[i + 1] < -0.1 * length):
+            elif pos[i] - pos[i + 1] < -0.1 * length:
                 crossings.append(i)
                 offset -= length
                 offsets.append(offset)
-        return (crossings, offsets)
 
-    def adjust_pos(self, pos, length):
-        """Adjust position for periodic boundary conditions
+        return crossings, offsets
+
+    def adjust_pos(self, pos: np.ndarray, length: float) -> np.ndarray:
+        """Adjust position for periodic boundary conditions.
 
         Args:
-            pos: the position along one axis
-            length: the box size along that axis
+            pos: Position array along one axis
+            length: Box size along that axis
+
+        Returns:
+            Adjusted position array
         """
         crossings, offsets = self.find_crossings(pos, length)
         pos_b = np.copy(pos)
         nc = len(crossings)
+
         if nc > 0:
-            crossings = np.asarray(crossings)
-            offsets = np.asarray(offsets)
+            crossings_arr = np.asarray(crossings)
+            offsets_arr = np.asarray(offsets)
             for i in range(nc - 1):
-                pos_b[crossings[i] + 1:crossings[i + 1] + 1] += offsets[i]
-            pos_b[crossings[nc - 1] + 1:] += offsets[nc - 1]
+                pos_b[crossings_arr[i] + 1:crossings_arr[i + 1] + 1] += offsets_arr[i]
+            pos_b[crossings_arr[nc - 1] + 1:] += offsets_arr[nc - 1]
+
         return pos_b
 
-    def adjust_tracer_pos(self):
-        """
-        """
-        self.tracer_adjusted = {}
-        self.tracer_adjusted["dX"] = self.adjust_pos(self.tracer_data['dX'],
-                                                     vpic_info["Lx/de"])
-        self.tracer_adjusted["dY"] = self.adjust_pos(self.tracer_data['dY'],
-                                                     vpic_info["Ly/de"])
-        self.tracer_adjusted["dZ"] = self.adjust_pos(self.tracer_data['dZ'],
-                                                     vpic_info["Lz/de"])
-
-    def exclude_boundary_segments(self, dim_h="x", dim_v="z"):
-        """Exclude boundary crossing segments
+    def adjust_tracer_pos(self, vpic_info: Dict[str, float]) -> None:
+        """Adjust tracer positions for periodic boundaries.
 
         Args:
-            dim_h: horizontal dimension
-            dim_v: vertical dimension
+            vpic_info: Dictionary with VPIC simulation parameters
+        """
+        self.tracer_adjusted = {
+            "dX": self.adjust_pos(self.tracer_data['dX'], config.vpic_info["Lx/de"]),
+            "dY": self.adjust_pos(self.tracer_data['dY'], config.vpic_info["Ly/de"]),
+            "dZ": self.adjust_pos(self.tracer_data['dZ'], config.vpic_info["Lz/de"])
+        }
+
+    def exclude_boundary_segments(
+        self, vpic_info: Dict[str, float], dim_h: str = "x", dim_v: str = "z"
+    ) -> None:
+        """Exclude trajectory segments that cross boundaries.
+
+        Args:
+            vpic_info: Dictionary with VPIC simulation parameters
+            dim_h: Horizontal dimension ('x', 'y', or 'z')
+            dim_v: Vertical dimension ('x', 'y', or 'z')
         """
         hdata = self.tracer_data["d" + dim_h.upper()]
         vdata = self.tracer_data["d" + dim_v.upper()]
-        lh_de = vpic_info["L" + dim_h + "/de"]
-        lv_de = vpic_info["L" + dim_v + "/de"]
+        lh_de = config.vpic_info["L" + dim_h + "/de"]
+        lv_de = config.vpic_info["L" + dim_v + "/de"]
+
         crossings_h, _ = self.find_crossings(hdata, lh_de)
         crossings_v, _ = self.find_crossings(vdata, lv_de)
         crossings = np.unique(np.concatenate((crossings_h, crossings_v)))
         crossings = crossings.astype(int)
+
         points = np.array([hdata, vdata]).T.reshape((-1, 1, 2))
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
         self.segments_wo_boundary = np.delete(segments, crossings, 0)
 
 
 class MplCanvas(FigureCanvasQTAgg):
-    def __init__(self,
-                 parent=None,
-                 width=5,
-                 height=4,
-                 dpi=100,
-                 axes_h="X",
-                 plot_type="Contour"):
-        self.fig = Figure(figsize=(width, height),
-                          constrained_layout=True,
-                          dpi=dpi)
-        self.create_axes(axes_h, plot_type)
-        super(MplCanvas, self).__init__(self.fig)
+    """Custom matplotlib canvas for Qt integration."""
 
-    def update_axes(self, axes_h="X", plot_type="Contour"):
+    def __init__(
+        self,
+        parent=None,
+        width: int = 5,
+        height: int = 4,
+        dpi: int = 100,
+        axes_h: str = "X",
+        plot_type: str = "Contour"
+    ):
+        """Initialize the matplotlib canvas.
+
+        Args:
+            parent: Parent widget
+            width: Figure width in inches
+            height: Figure height in inches
+            dpi: Dots per inch
+            axes_h: Horizontal axis label
+            plot_type: Type of plot ('Contour', 'Contour+X-Average', etc.)
+        """
+        self.fig = Figure(figsize=(width, height), constrained_layout=True, dpi=dpi)
+        self.ax_main = None
+        self.ax_cbar = None
+        self.ax1d = None
+        self.ax_tracer = None
+        self.create_axes(axes_h, plot_type)
+        super().__init__(self.fig)
+
+    def update_axes(self, axes_h: str = "X", plot_type: str = "Contour") -> None:
+        """Update axes configuration.
+
+        Args:
+            axes_h: Horizontal axis label
+            plot_type: Type of plot
+        """
         self.create_axes(axes_h, plot_type)
 
-    def create_axes(self, axes_h="X", plot_type="Contour"):
+    def create_axes(self, axes_h: str = "X", plot_type: str = "Contour") -> None:
+        """Create axes based on plot type.
+
+        Args:
+            axes_h: Horizontal axis label
+            plot_type: Type of plot to create axes for
+        """
         if plot_type == "Contour":
             widths = [4.8, 0.2]
             spec = self.fig.add_gridspec(nrows=1, ncols=2, width_ratios=widths)
             self.ax_main = self.fig.add_subplot(spec[0, 0])
             self.ax_cbar = self.fig.add_subplot(spec[0, 1])
-        elif plot_type in [
-                "Contour+" + axes_h + "-Average",
-                "Contour+" + axes_h + "-Slice"
-        ]:
+        elif plot_type in [f"Contour+{axes_h}-Average", f"Contour+{axes_h}-Slice"]:
             widths = [0.2, 4.8, 1.2]
-            spec = self.fig.add_gridspec(nrows=1,
-                                         ncols=3,
-                                         width_ratios=widths,
-                                         wspace=0.0,
-                                         hspace=0.0)
+            spec = self.fig.add_gridspec(
+                nrows=1, ncols=3, width_ratios=widths, wspace=0.0, hspace=0.0
+            )
             self.ax_main = self.fig.add_subplot(spec[0, 1])
             self.ax1d = self.fig.add_subplot(spec[0, 2], sharey=self.ax_main)
             self.ax_cbar = self.fig.add_subplot(spec[0, 0])
         else:
             widths = [4.8, 0.2]
             heights = [4.8, 1.2]
-            spec = self.fig.add_gridspec(nrows=2,
-                                         ncols=2,
-                                         width_ratios=widths,
-                                         height_ratios=heights,
-                                         wspace=0.0,
-                                         hspace=0.0)
+            spec = self.fig.add_gridspec(
+                nrows=2, ncols=2, width_ratios=widths, height_ratios=heights,
+                wspace=0.0, hspace=0.0
+            )
             self.ax_main = self.fig.add_subplot(spec[0, 0])
             self.ax_main.tick_params(axis='x', labelbottom=False)
             self.ax1d = self.fig.add_subplot(spec[1, 0], sharex=self.ax_main)
             self.ax_cbar = self.fig.add_subplot(spec[0, 1])
 
-    def create_tracer_axes(self):
+    def create_tracer_axes(self) -> None:
+        """Create an inset axes for tracer energy plot."""
         pos = np.asarray(self.ax_main.get_position()).flatten()
         box_w = pos[2] - pos[0]
         box_h = pos[3] - pos[1]
@@ -254,7 +517,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # check if the simulation is 2D
         self.coords = ["x", "y", "z"]
         self.norms_gda = {"z": 0, "y": 1, "x": 2}
-        self.norms_hdf5 = {"z": 0, "y": 1, "x": 2}
+        # Set HDF5 axis mapping based on data order configuration
+        if config.hdf5_data_order == "zyx":
+            # Newer VPIC: data stored as (nz, ny, nx)
+            self.norms_hdf5 = {"z": 0, "y": 1, "x": 2}
+        else:
+            # Older VPIC: data stored as (nx, ny, nz)
+            self.norms_hdf5 = {"x": 0, "y": 1, "z": 2}
         self.normal = "y"  # normal direction
         self.is_2d = False  # whether is a 2D simulation
         for c in self.coords:
@@ -264,12 +533,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.hv = [c for c in self.coords if c != self.normal]  # in-plane
 
         # the file type (HDF5 or gda)
-        if hdf5_fields:
+        if config.hdf5_fields:
             self.filetype_comboBox.setCurrentText("HDF5")
         else:
             self.filetype_comboBox.setCurrentText("gda")
-            if smoothed_data:
-                self.gda_path = "../" + dir_smooth_data + "/"
+            if config.smoothed_data:
+                self.gda_path = "../" + config.dir_smooth_data + "/"
             else:
                 self.gda_path = "../data/"
             self.tframe_loaded = -1
@@ -338,8 +607,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.plot_verticalLayout.addWidget(self.canvas)
 
         # Time slice
-        self.tframe_hSlider.setMinimum(tmin)
-        self.tframe_hSlider.setMaximum(tmax)
+        self.tframe_hSlider.setMinimum(config.tmin)
+        self.tframe_hSlider.setMaximum(config.tmax)
         self.tframe_SpinBox.setMinimum(self.tframe_hSlider.minimum())
         self.tframe_SpinBox.setMaximum(self.tframe_hSlider.maximum())
         self.tframe_hSlider.valueChanged.connect(self.tframe_hSlider_vchange)
@@ -352,11 +621,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.var_name = self.rawplot_comboBox.currentText()
         self.plot_type = self.plottype_comboBox.currentText()
         self.tframe = self.tframe_hSlider.value()
-        if "fields_interval" not in vpic_info:
-            vpic_info["fields_interval"], _ = QtWidgets.QInputDialog.getInt(
+        if "fields_interval" not in config.vpic_info:
+            config.config.vpic_info["fields_interval"], _ = QtWidgets.QInputDialog.getInt(
                 self, "Get fields interval", "Fields interval:", 100, 0,
                 10000000, 1)
-        self.tindex = self.tframe * int(vpic_info["fields_interval"])
+        self.tindex = self.tframe * int(config.vpic_info["fields_interval"])
 
         # x-range
         self.xmin_hScrollBar.valueChanged.connect(self.xmin_hScrollBar_vchange)
@@ -511,7 +780,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.cbar_checkBox.stateChanged.connect(self.cbar_checkBox_change)
 
         # tracer particle index
-        self.tracer = TracerData(tracer_filepath, tracer_filename)
+        self.tracer = TracerData(config.tracer_filepath, config.tracer_filename)
         self.tracer_index_SpinBox.setMinimum(0)
         self.tracer_index_SpinBox.setMaximum(100)
         self.tracer_index_SpinBox.setKeyboardTracking(False)
@@ -564,11 +833,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.tracer.get_tracer_tags()
             self.tracer_index = self.tracer_index_SpinBox.value()
             self.tracer_tag = self.tracer.tracer_tags[self.tracer_index]
-            self.dt_tracer = vpic_info["tracer_interval"] * vpic_info["dt*wpe"]
+            self.dt_tracer = config.vpic_info["tracer_interval"] * config.vpic_info["dt*wpe"]
             self.tracer.read_tracer_data(self.tracer_tag, self.dt_tracer)
             self.tracer.calc_tracer_energy()
-            self.tracer.adjust_tracer_pos()
-            self.tracer.exclude_boundary_segments(self.hv[0], self.hv[1])
+            self.tracer.adjust_tracer_pos(config.vpic_info)
+            self.tracer.exclude_boundary_segments(config.vpic_info, self.hv[0], self.hv[1])
             self.canvas.create_tracer_axes()
             self.plot_tracer()
         else:
@@ -607,7 +876,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def tframe_hSlider_vchange(self, value):
         self.tframe_SpinBox.setValue(value)
         self.tframe = value
-        self.tindex = self.tframe * int(vpic_info["fields_interval"])
+        self.tindex = self.tframe * int(config.vpic_info["fields_interval"])
         self.read_data(self.var_name, self.tindex)
         if self.auto_update:
             self.update_plot()
@@ -754,7 +1023,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.update_plot()
 
     def raw_plot_variables(self):
-        if hdf5_fields:
+        if config.hdf5_fields:
             self.fields_list = ["cbx", "cby", "cbz", "absb", "ex", "ey", "ez"]
             self.jlist = ["jx", "jy", "jz", "absj"]
             self.ehydro_list = [
@@ -765,7 +1034,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 "ni", "vix", "viy", "viz", "pixx", "pixy", "pixz", "piyx",
                 "piyy", "piyz", "pizx", "pizy", "pizz"
             ]
-            if momentum_field:
+            if config.momentum_field:
                 self.ehydro_list += [
                     "uex",
                     "uey",
@@ -801,7 +1070,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def diag_plot_variables(self):
         self.diag_var_list = ["", "jdotE"]
-        if turbulence_mixing:
+        if config.turbulence_mixing:
             self.diag_var_list.append("emix")
         _translate = QtCore.QCoreApplication.translate
         for ivar, var in enumerate(self.diag_var_list):
@@ -822,8 +1091,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.tracer_tag = self.tracer.tracer_tags[self.tracer_index]
         self.tracer.read_tracer_data(self.tracer_tag, self.dt_tracer)
         self.tracer.calc_tracer_energy()
-        self.tracer.adjust_tracer_pos()
-        self.tracer.exclude_boundary_segments(self.hv[0], self.hv[1])
+        self.tracer.adjust_tracer_pos(config.vpic_info)
+        self.tracer.exclude_boundary_segments(config.vpic_info, self.hv[0], self.hv[1])
         self.plot_tracer()
 
     def get_domain(self):
@@ -831,23 +1100,23 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         """
         self.vpic_domain = {}
         self.vpic_domain["xmin"] = 0.0
-        self.vpic_domain["xmax"] = vpic_info["Lx/de"]
-        self.vpic_domain["ymin"] = -0.5 * vpic_info["Ly/de"]
-        self.vpic_domain["ymax"] = 0.5 * vpic_info["Ly/de"]
-        self.vpic_domain["zmin"] = -0.5 * vpic_info["Lz/de"]
-        self.vpic_domain["zmax"] = 0.5 * vpic_info["Lz/de"]
-        self.vpic_domain["nx"] = int(vpic_info["nx"]) // smooth_factor
-        self.vpic_domain["ny"] = int(vpic_info["ny"]) // smooth_factor
-        self.vpic_domain["nz"] = int(vpic_info["nz"]) // smooth_factor
-        self.vpic_domain["dx"] = vpic_info["dx/de"] * smooth_factor
-        self.vpic_domain["dy"] = vpic_info["dy/de"] * smooth_factor
-        self.vpic_domain["dz"] = vpic_info["dz/de"] * smooth_factor
+        self.vpic_domain["xmax"] = config.vpic_info["Lx/de"]
+        self.vpic_domain["ymin"] = -0.5 * config.vpic_info["Ly/de"]
+        self.vpic_domain["ymax"] = 0.5 * config.vpic_info["Ly/de"]
+        self.vpic_domain["zmin"] = -0.5 * config.vpic_info["Lz/de"]
+        self.vpic_domain["zmax"] = 0.5 * config.vpic_info["Lz/de"]
+        self.vpic_domain["nx"] = int(config.vpic_info["nx"]) // config.smooth_factor
+        self.vpic_domain["ny"] = int(config.vpic_info["ny"]) // config.smooth_factor
+        self.vpic_domain["nz"] = int(config.vpic_info["nz"]) // config.smooth_factor
+        self.vpic_domain["dx"] = config.vpic_info["dx/de"] * config.smooth_factor
+        self.vpic_domain["dy"] = config.vpic_info["dy/de"] * config.smooth_factor
+        self.vpic_domain["dz"] = config.vpic_info["dz/de"] * config.smooth_factor
         for i in ["x", "y", "z"]:
             n = "n" + i
             d = "d" + i
-            if vpic_info[n] < smooth_factor:
+            if config.vpic_info[n] < config.smooth_factor:
                 self.vpic_domain[n] = 1
-                self.vpic_domain[d] = vpic_info[d + "/de"] * vpic_info[n]
+                self.vpic_domain[d] = config.vpic_info[d + "/de"] * config.vpic_info[n]
         hdx = 0.5 * self.vpic_domain["dx"]
         hdy = 0.5 * self.vpic_domain["dy"]
         hdz = 0.5 * self.vpic_domain["dz"]
@@ -921,13 +1190,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             vname (string): variable name
             tindex (int): time index
         """
-        if smoothed_data:
-            fname = ("../" + dir_smooth_data + "/fields_" + str(tindex) + ".h5")
+        if config.smoothed_data:
+            fname = ("../" + config.dir_smooth_data + "/fields_" + str(tindex) + ".h5")
         else:
-            if time_averaged_field:
+            if config.time_averaged_field:
                 fdir = "../fields-avg-hdf5/T." + str(tindex) + "/"
             else:
-                fdir = "../field_hdf5/T." + str(tindex) + "/"
+                fdir = "../" + config.dir_fields_hdf5 + "/T." + str(tindex) + "/"
             fname = fdir + "fields_" + str(tindex) + ".h5"
         with h5py.File(fname, 'r') as fh:
             group = fh["Timestep_" + str(tindex)]
@@ -943,13 +1212,15 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                                       bvec["cbz"]**2),
                                               axis=self.norms_hdf5[self.normal])
                 else:
+                    # Slice based on data order (norms_hdf5 maps direction to axis)
+                    axis_idx = self.norms_hdf5[self.normal]
                     for var in ["cbx", "cby", "cbz"]:
                         dset = group[var]
-                        if self.normal == 'x':
+                        if axis_idx == 0:
                             bvec[var] = dset[self.plane_index, :, :]
-                        elif self.normal == 'y':
+                        elif axis_idx == 1:
                             bvec[var] = dset[:, self.plane_index, :]
-                        else:
+                        else:  # axis_idx == 2
                             bvec[var] = dset[:, :, self.plane_index]
                     field_2d = np.sqrt(bvec["cbx"]**2 + bvec["cby"]**2 +
                                        bvec["cbz"]**2)
@@ -960,11 +1231,13 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     field_2d = dcell * np.sum(dset[:, :, :],
                                               axis=self.norms_hdf5[self.normal])
                 else:
-                    if self.normal == 'x':
+                    # Slice based on data order (norms_hdf5 maps direction to axis)
+                    axis_idx = self.norms_hdf5[self.normal]
+                    if axis_idx == 0:
                         field_2d = dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
+                    elif axis_idx == 1:
                         field_2d = dset[:, self.plane_index, :]
-                    else:
+                    else:  # axis_idx == 2
                         field_2d = dset[:, :, self.plane_index]
         return field_2d
 
@@ -976,11 +1249,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             tindex (int): time index
             species (string): particle species
         """
-        if smoothed_data:
-            fname = ("../" + dir_smooth_data + "/hydro_" + species + "_" +
+        if config.smoothed_data:
+            fname = ("../" + config.dir_smooth_data + "/hydro_" + species + "_" +
                      str(tindex) + ".h5")
         else:
-            if time_averaged_field:
+            if config.time_averaged_field:
                 fdir = "../hydro-avg-hdf5/T." + str(tindex) + "/"
             else:
                 fdir = "../hydro_hdf5/T." + str(tindex) + "/"
@@ -994,24 +1267,28 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         dset = group[var]
                         jsp[var] = dset[:, :, :]
                 else:
+                    # Slice based on data order (norms_hdf5 maps direction to axis)
+                    axis_idx = self.norms_hdf5[self.normal]
                     for var in ["jx", "jy", "jz"]:
                         dset = group[var]
-                        if self.normal == 'x':
+                        if axis_idx == 0:
                             jsp[var] = dset[self.plane_index, :, :]
-                        elif self.normal == 'y':
+                        elif axis_idx == 1:
                             jsp[var] = dset[:, self.plane_index, :]
-                        else:
+                        else:  # axis_idx == 2
                             jsp[var] = dset[:, :, self.plane_index]
             else:
                 dset = group[vname]
                 if self.integrate_normal:
                     jsp["jdir"] = dset[:, :, :]
                 else:
-                    if self.normal == 'x':
+                    # Slice based on data order (norms_hdf5 maps direction to axis)
+                    axis_idx = self.norms_hdf5[self.normal]
+                    if axis_idx == 0:
                         jsp["jdir"] = dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
+                    elif axis_idx == 1:
                         jsp["jdir"] = dset[:, self.plane_index, :]
-                    else:
+                    else:  # axis_idx == 2
                         jsp["jdir"] = dset[:, :, self.plane_index]
         return jsp
 
@@ -1023,7 +1300,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             tindex (int): time index
         """
         # Electron
-        if turbulence_mixing:
+        if config.turbulence_mixing:
             jsp = self.read_current_density_species(vname, tindex,
                                                     "electronTop")
             jtmp = self.read_current_density_species(vname, tindex,
@@ -1034,7 +1311,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             jsp = self.read_current_density_species(vname, tindex, "electron")
 
         # Ion
-        if turbulence_mixing:
+        if config.turbulence_mixing:
             jtmp = self.read_current_density_species(vname, tindex, "ionTop")
             for var in jsp:
                 jsp[var] += jtmp[var]
@@ -1072,21 +1349,21 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             species (string): particle species
         """
         if vname in self.ehydro_list:
-            if smoothed_data:
-                fname = ("../" + dir_smooth_data + "/hydro_" + species + "_" +
+            if config.smoothed_data:
+                fname = ("../" + config.dir_smooth_data + "/hydro_" + species + "_" +
                          str(tindex) + ".h5")
             else:
-                if time_averaged_field:
+                if config.time_averaged_field:
                     fdir = "../hydro-avg-hdf5/T." + str(tindex) + "/"
                 else:
                     fdir = "../hydro_hdf5/T." + str(tindex) + "/"
                 fname = fdir + "hydro_" + species + "_" + str(tindex) + ".h5"
         else:
-            if smoothed_data:
-                fname = ("../" + dir_smooth_data + "/hydro_" + species + "_" +
+            if config.smoothed_data:
+                fname = ("../" + config.dir_smooth_data + "/hydro_" + species + "_" +
                          str(tindex) + ".h5")
             else:
-                if time_averaged_field:
+                if config.time_averaged_field:
                     fdir = "../hydro-avg-hdf5/T." + str(tindex) + "/"
                 else:
                     fdir = "../hydro_hdf5/T." + str(tindex) + "/"
@@ -1118,13 +1395,15 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     dset = group[key]
                     hydro[key] = dset[:, :, :]
             else:
+                # Slice based on data order (norms_hdf5 maps direction to axis)
+                axis_idx = self.norms_hdf5[self.normal]
                 for key in keys:
                     dset = group[key]
-                    if self.normal == 'x':
+                    if axis_idx == 0:
                         hydro[key] = dset[self.plane_index, :, :]
-                    elif self.normal == 'y':
+                    elif axis_idx == 1:
                         hydro[key] = dset[:, self.plane_index, :]
-                    else:
+                    else:  # axis_idx == 2
                         hydro[key] = dset[:, :, self.plane_index]
 
         return hydro
@@ -1138,7 +1417,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         """
         if vname in self.ehydro_list:
             pmass = 1.0
-            if turbulence_mixing:
+            if config.turbulence_mixing:
                 hydro = self.read_hydro_species(vname, tindex, "electronTop")
                 hydro_bot = self.read_hydro_species(vname, tindex,
                                                     "electronBot")
@@ -1147,8 +1426,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             else:
                 hydro = self.read_hydro_species(vname, tindex, "electron")
         else:
-            pmass = vpic_info["mi/me"]
-            if turbulence_mixing:
+            pmass = config.vpic_info["mi/me"]
+            if config.turbulence_mixing:
                 hydro = self.read_hydro_species(vname, tindex, "ionTop")
                 hydro_bot = self.read_hydro_species(vname, tindex, "ionBot")
                 for var in hydro:
@@ -1201,7 +1480,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def get_jdote(self, tindex):
         """get the diagnostics data of j.E
         """
-        if hdf5_fields:
+        if config.hdf5_fields:
             jx = self.read_current_density("jx", tindex)
             jy = self.read_current_density("jy", tindex)
             jz = self.read_current_density("jz", tindex)
@@ -1254,7 +1533,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 self.field_2d, self.field_3d = self.electron_mixing_fraction(
                     tindex)
         else:
-            if hdf5_fields:
+            if config.hdf5_fields:
                 if vname in self.fields_list:  # electric and magnetic fields
                     self.field_2d = self.read_fields(vname, tindex)
                 elif vname in self.jlist:  # current density
@@ -1301,10 +1580,20 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         hmax_s = hmax - self.vpic_domain[h + "min"]
         vmin_s = vmin - self.vpic_domain[v + "min"]
         vmax_s = vmax - self.vpic_domain[v + "min"]
-        ihs = math.floor(hmin_s / self.vpic_domain["d" + h])
-        ihe = math.ceil(hmax_s / self.vpic_domain["d" + h])
-        ivs = math.floor(vmin_s / self.vpic_domain["d" + v])
-        ive = math.ceil(vmax_s / self.vpic_domain["d" + v])
+
+        # Calculate indices, accounting for actual field dimensions
+        h_range = self.vpic_domain[h + "max"] - self.vpic_domain[h + "min"]
+        v_range = self.vpic_domain[v + "max"] - self.vpic_domain[v + "min"]
+        ihs = int((hmin_s / h_range) * self.field_2d.shape[0])
+        ihe = int(math.ceil((hmax_s / h_range) * self.field_2d.shape[0]))
+        ivs = int((vmin_s / v_range) * self.field_2d.shape[1])
+        ive = int(math.ceil((vmax_s / v_range) * self.field_2d.shape[1]))
+
+        # Clamp to actual field bounds
+        ihs = max(0, min(ihs, self.field_2d.shape[0]))
+        ihe = max(0, min(ihe, self.field_2d.shape[0]))
+        ivs = max(0, min(ivs, self.field_2d.shape[1]))
+        ive = max(0, min(ive, self.field_2d.shape[1]))
 
         # rescale the plot when additional panels are included
         orientation = "vertical"
@@ -1347,33 +1636,47 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.field_1d = np.mean(self.field_2d[ihs:ihe, :], axis=0)
         elif self.plot_type == "Contour+" + self.hv[0].upper() + "-Slice":
             hslice = self.slice_dist[h + "slice_box"].value()
-            ih_slice = int((hslice - self.vpic_domain[h + "min"]) /
-                           self.vpic_domain["d" + h])
-            if ih_slice == self.vpic_domain["n" + h]:
-                ih_slice = self.vpic_domain["n" + h] - 1
+            # Map slice position to actual array index
+            h_range = self.vpic_domain[h + "max"] - self.vpic_domain[h + "min"]
+            h_fraction = (hslice - self.vpic_domain[h + "min"]) / h_range
+            ih_slice = int(h_fraction * self.field_2d.shape[0])
+            # Clamp to actual array bounds
+            ih_slice = min(max(0, ih_slice), self.field_2d.shape[0] - 1)
             self.field_1d = self.field_2d[ih_slice, :]
             ylim = self.canvas.ax_main.get_ylim()
             self.canvas.ax_main.plot([hslice, hslice], ylim, color='w')
             self.canvas.ax_main.set_ylim(ylim)
         elif self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
             vslice = self.slice_dist[v + "slice_box"].value()
-            iv_slice = int((vslice - self.vpic_domain[v + "min"]) /
-                           self.vpic_domain["d" + v])
-            if iv_slice == self.vpic_domain["n" + v]:
-                iv_slice = self.vpic_domain["n" + v] - 1
+            # Map slice position to actual array index
+            v_range = self.vpic_domain[v + "max"] - self.vpic_domain[v + "min"]
+            v_fraction = (vslice - self.vpic_domain[v + "min"]) / v_range
+            iv_slice = int(v_fraction * self.field_2d.shape[1])
+            # Clamp to actual array bounds
+            iv_slice = min(max(0, iv_slice), self.field_2d.shape[1] - 1)
             self.field_1d = self.field_2d[:, iv_slice]
             xlim = self.canvas.ax_main.get_xlim()
             self.canvas.ax_main.plot(xlim, [vslice, vslice], color='w')
             self.canvas.ax_main.set_xlim(xlim)
         if ("Contour+" + self.hv[0].upper()) in self.plot_type:
             self.canvas.ax1d.clear()
-            self.canvas.ax1d.plot(self.field_1d[ivs:ive],
-                                  self.vpic_domain[v + "grid"][ivs:ive])
+            # Ensure indices are within field_1d bounds
+            ivs_clamp = min(ivs, len(self.field_1d))
+            ive_clamp = min(ive, len(self.field_1d))
+            # Use actual field grid that matches field_1d size
+            v_grid = np.linspace(vmin, vmax, len(self.field_1d))
+            self.canvas.ax1d.plot(self.field_1d[ivs_clamp:ive_clamp],
+                                  v_grid[ivs_clamp:ive_clamp])
             self.canvas.ax1d.set_ylim(self.canvas.ax_main.get_ylim())
         elif self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
             self.canvas.ax1d.clear()
-            self.canvas.ax1d.plot(self.vpic_domain[h + "grid"][ihs:ihe],
-                                  self.field_1d[ihs:ihe])
+            # Ensure indices are within field_1d bounds
+            ihs_clamp = min(ihs, len(self.field_1d))
+            ihe_clamp = min(ihe, len(self.field_1d))
+            # Use actual field grid that matches field_1d size
+            h_grid = np.linspace(hmin, hmax, len(self.field_1d))
+            self.canvas.ax1d.plot(h_grid[ihs_clamp:ihe_clamp],
+                                  self.field_1d[ihs_clamp:ihe_clamp])
             self.canvas.ax1d.set_xlim(self.canvas.ax_main.get_xlim())
 
         if self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
@@ -1409,7 +1712,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # plot the current point
         hdata = self.tracer.tracer_data["d" + self.hv[0].upper()]
         vdata = self.tracer.tracer_data["d" + self.hv[1].upper()]
-        self.tindex_tracer = int(self.tindex / vpic_info["tracer_interval"])
+        self.tindex_tracer = int(self.tindex / config.vpic_info["tracer_interval"])
         if self.tindex_tracer > len(hdata):
             self.tindex_tracer = len(hdata) - 1
         self.tracer_dot_plot, = self.canvas.ax_main.plot(
@@ -1429,7 +1732,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.tracer_time_energy = self.canvas.ax_tracer.add_collection(lc)
         self.canvas.ax_tracer.set_xlim([ttracer.min(), ttracer.max()])
         ylim = [0, kene_tracer.max()]
-        twpe = self.tindex * vpic_info["dt*wpe"]
+        twpe = self.tindex * config.vpic_info["dt*wpe"]
         self.tracer_time_indicator, = self.canvas.ax_tracer.plot([twpe, twpe],
                                                                  ylim,
                                                                  linewidth=1,
@@ -1441,10 +1744,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def start_animation(self):
         self.timer = QtCore.QTimer()
-        self.timer.setInterval(animation_tinterval)
+        self.timer.setInterval(config.animation_tinterval)
         self.timer.timeout.connect(self.tick_timer)
         self.timer.start()
-        self.tframe_hSlider.setValue(tmin)
+        self.tframe_hSlider.setValue(config.tmin)
         self.stop_animateButton.setDisabled(False)
         self.continue_animateButton.setDisabled(False)
         self.is_animation = True
@@ -1452,8 +1755,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.autoplot_checkBox.setChecked(True)
 
     def tick_timer(self):
-        tframe = ((self.tframe - tmin + 1) % nt) + tmin
-        if self.tframe == tmax:
+        tframe = ((self.tframe - config.tmin + 1) % config.nt) + config.tmin
+        if self.tframe == config.tmax:
             self.savejpg_checkBox.setChecked(False)
         self.tframe_hSlider.setValue(tframe)
 
@@ -1469,7 +1772,104 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.autoplot_checkBox.setChecked(True)
 
 
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Quick Check VPIC - Interactive visualization tool for VPIC simulation data',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  %(prog)s                          # Auto-detect configuration
+  %(prog)s --config my_config.yaml  # Use specific config file
+  %(prog)s --hdf5                   # Force HDF5 format
+  %(prog)s --gda --no-smooth        # Force GDA format without smoothing
+  %(prog)s --tmin 10 --tmax 100     # Set time range
+
+For more information, see the README or config_example.yaml
+        '''
+    )
+
+    parser.add_argument('-c', '--config', type=str,
+                        help='Path to configuration YAML file')
+    parser.add_argument('--info-file', type=str, default='../info',
+                        help='Path to VPIC info file (default: ../info)')
+    parser.add_argument('--hdf5', action='store_true',
+                        help='Force HDF5 field format')
+    parser.add_argument('--gda', action='store_true',
+                        help='Force GDA field format')
+    parser.add_argument('--smooth', action='store_true',
+                        help='Force smoothed data mode')
+    parser.add_argument('--no-smooth', action='store_true',
+                        help='Force non-smoothed data mode')
+    parser.add_argument('--tmin', type=int,
+                        help='Minimum time frame')
+    parser.add_argument('--tmax', type=int,
+                        help='Maximum time frame')
+    parser.add_argument('--no-auto-detect', action='store_true',
+                        help='Disable auto-detection')
+
+    return parser.parse_args()
+
+
 def main():
+    """Main entry point for the application."""
+    global config
+
+    # Parse command-line arguments
+    args = parse_args()
+
+    # Load configuration
+    config = load_config(
+        config_file=args.config,
+        auto_detect=not args.no_auto_detect
+    )
+
+    # Override config with command-line arguments
+    if args.info_file:
+        config.info_file = args.info_file
+        # Reload vpic_info if info file changed
+        try:
+            config.vpic_info = get_vpic_info(args.info_file)
+        except Exception as e:
+            print(f"Warning: Could not load info file: {e}")
+
+    if args.hdf5:
+        config.hdf5_fields = True
+    elif args.gda:
+        config.hdf5_fields = False
+
+    if args.smooth:
+        config.smoothed_data = True
+    elif args.no_smooth:
+        config.smoothed_data = False
+        config.smooth_factor = 1
+
+    if args.tmin is not None:
+        config.tmin = args.tmin
+    if args.tmax is not None:
+        config.tmax = args.tmax
+
+    # Recalculate nt
+    config.nt = config.tmax - config.tmin + 1
+
+    # Print final configuration
+    print("\n" + "="*60)
+    print("VPIC Quick Check - Configuration")
+    print("="*60)
+    print(f"File format: {'HDF5' if config.hdf5_fields else 'GDA'}")
+    print(f"Smoothed data: {config.smoothed_data}")
+    if config.smoothed_data:
+        print(f"  Smooth factor: {config.smooth_factor}")
+        print(f"  Data directory: ../{config.dir_smooth_data}/")
+    print(f"Time range: {config.tmin} - {config.tmax} ({config.nt} frames)")
+    print(f"Info file: {config.info_file}")
+    if config.vpic_info:
+        print(f"Simulation domain: {config.vpic_info.get('Lx/de', '?')} x "
+              f"{config.vpic_info.get('Ly/de', '?')} x "
+              f"{config.vpic_info.get('Lz/de', '?')} de")
+    print("="*60 + "\n")
+
+    # Start Qt application
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow()
     window.show()
