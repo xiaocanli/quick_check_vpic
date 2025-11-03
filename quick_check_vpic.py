@@ -233,6 +233,7 @@ class Config:
     smooth_factor: int = 2
     dir_smooth_data: str = "data_smooth"
     dir_fields_hdf5: str = "field_hdf5"  # Field directory name (field_hdf5 or fields_hdf5)
+    dir_beta_hdf5: str = "hydro-int-hdf5"  # Beta diagnostics directory name
     hdf5_data_order: str = "xyz"  # HDF5 data order: "xyz" (old) or "zyx" (new)
     momentum_field: bool = True
     time_averaged_field: bool = False
@@ -353,6 +354,14 @@ class Config:
             print(f"Auto-detected: Smoothed data in {config_dict['dir_smooth_data']}/")
         else:
             config_dict['smoothed_data'] = False
+
+        # Auto-detect beta diagnostics directory
+        if Path('../hydro-int-hdf5').exists():
+            config_dict['dir_beta_hdf5'] = 'hydro-int-hdf5'
+            print("Auto-detected: Beta diagnostics in hydro-int-hdf5/")
+        elif Path('../hydro_int_hdf5').exists():
+            config_dict['dir_beta_hdf5'] = 'hydro_int_hdf5'
+            print("Auto-detected: Beta diagnostics in hydro_int_hdf5/")
 
         # Auto-detect turbulence mixing
         if Path('../hydro_hdf5').exists():
@@ -715,6 +724,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.over_var_name = ""
         self.over_plot_variables()
         self.tracer_plot = None
+        self.field_line_plot = None
         self.overplot_comboBox.currentTextChanged.connect(
             self.overplot_comboBox_vchange)
 
@@ -954,14 +964,26 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def overplot_comboBox_vchange(self, value):
         self.over_var_name = self.overplot_comboBox.currentText()
-        if self.over_var_name in ["", "Ay"]:
+        if not self.over_var_name:
             self.over_plot = False
+            if self.field_line_plot:
+                self.field_line_plot.lines.remove()
+                for art in self.canvas.ax_main.get_children():
+                    if not isinstance(art, mpl.patches.FancyArrowPatch):
+                        continue
+                    art.remove()
+                self.field_line_plot = None
+                self.canvas.draw()
             if self.tracer_plot:
                 self.tracer_plot.remove()
                 self.tracer_dot_plot.remove()
                 self.tracer_plot = None
                 self.canvas.ax_tracer.remove()
                 self.canvas.draw()
+        elif self.over_var_name == "field line":
+            self.over_plot = True
+            self.read_magnetic_field(self.tindex)
+            self.plot_field_line()
         elif self.over_var_name == "trajectory":
             self.over_plot = True
             self.over_var_name = self.over_var_name
@@ -1015,6 +1037,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.tframe = value
         self.tindex = self.tframe * int(config.vpic_info["fields_interval"])
         self.read_data(self.var_name, self.tindex)
+        if self.field_line_plot:
+            self.read_magnetic_field(self.tindex)
         if self.auto_update:
             self.update_plot()
 
@@ -1124,6 +1148,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if int(mid) == old_plane:  # force update
             self.set_plane_index()
             self.read_data(self.var_name, self.tindex)
+            if self.field_line_plot:
+                self.read_magnetic_field(self.tindex)
             if self.auto_update:
                 self.update_plot()
         self.plottype_comboBox.setItemText(
@@ -1156,6 +1182,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.plane_hScrollBar.setValue(int(value))
         self.set_plane_index()
         self.read_data(self.var_name, self.tindex)
+        if self.field_line_plot:
+            self.read_magnetic_field(self.tindex)
         if self.auto_update:
             self.update_plot()
 
@@ -1191,6 +1219,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     hydro_dir = "../hydro_hdf5/T.0/"
 
             self.hydro_list = []
+            self.ehydro_list = []  # Electron hydro variables
             self.jlist = ["jx", "jy", "jz", "absj"]
 
             if config.auto_detect_species:
@@ -1226,7 +1255,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     with h5py.File(fname, "r") as fh:
                         group = fh["Timestep_0"]
                         for var in group.keys():
-                            self.hydro_list.append(species + "-" + var)
+                            var_name = species + "-" + var
+                            self.hydro_list.append(var_name)
+                            # Track electron hydro variables separately
+                            if species.lower() == "electron":
+                                self.ehydro_list.append(var_name)
                 except Exception as e:
                     print(f"Warning: Could not read hydro file for species '{species}': {e}")
                     print(f"Skipping species '{species}'")
@@ -1264,7 +1297,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                                _translate("MainWindow", var))
 
     def over_plot_variables(self):
-        self.over_var_list = ["", "Ay", "trajectory"]
+        self.over_var_list = ["", "field line", "trajectory"]
         _translate = QtCore.QCoreApplication.translate
         for ivar, var in enumerate(self.over_var_list):
             self.overplot_comboBox.addItem("")
@@ -1427,13 +1460,14 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         return field_2d
 
     def read_current_density_species(self, vname, tindex, species):
-        """read current density associated with one species
+        """Read current density associated with one species
 
         Args:
             vname (string): variable name
             tindex (int): time index
             species (string): particle species
         """
+        # Determine file path
         if config.smoothed_data:
             fname = ("../" + config.dir_smooth_data + "/hydro_" + species + "_" +
                      str(tindex) + ".h5")
@@ -1443,10 +1477,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             else:
                 fdir = "../hydro_hdf5/T." + str(tindex) + "/"
             fname = fdir + "hydro_" + species + "_" + str(tindex) + ".h5"
+
         jsp = {}
         with h5py.File(fname, 'r') as fh:
             group = fh["Timestep_" + str(tindex)]
             if vname == "absj":
+                # Read all three current density components for magnitude calculation
                 if self.integrate_normal:
                     for var in ["jx", "jy", "jz"]:
                         dset = group[var]
@@ -1463,6 +1499,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         else:  # axis_idx == 2
                             jsp[var] = dset[:, :, self.plane_index]
             else:
+                # Read specific current density component
                 dset = group[vname]
                 if self.integrate_normal:
                     jsp["jdir"] = dset[:, :, :]
@@ -1558,108 +1595,89 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         keys = []
         with h5py.File(fname, 'r') as fh:
             group = fh["Timestep_" + str(tindex)]
-            if vname[0] == "n":
+            # Extract the actual variable name (remove species prefix like "electron-")
+            if "-" in vname:
+                var_only = vname.split("-", 1)[1]
+            else:
+                var_only = vname
+            
+            if var_only[0] == "n":
                 keys.append("rho")
-            elif vname[0] == 'v':  # for velocity
+            elif var_only[0] == 'v':  # for velocity
                 keys.append("rho")
-                keys.append("j" + vname[-1])
-            elif vname[0] == 'u':  # for four-velocity
+                keys.append("j" + var_only[-1])
+            elif var_only[0] == 'u':  # for four-velocity
                 keys.append("rho")
-                keys.append("p" + vname[-1])
+                keys.append("p" + var_only[-1])
             else:  # for pressure tensor
                 keys.append("rho")
-                keys.append("j" + vname[-2])
-                keys.append("p" + vname[-1])
-                vtmp = "t" + vname[2:]
+                keys.append("j" + var_only[-2])
+                keys.append("p" + var_only[-1])
+                vtmp = "t" + var_only[2:]
                 if vtmp in group:
                     keys.append(vtmp)
                 else:
-                    keys.append("t" + vname[-1] + vname[-2])
+                    keys.append("t" + var_only[-1] + var_only[-2])
             if self.integrate_normal:
                 for key in keys:
-                    dset = group[key]
-                    hydro[key] = dset[:, :, :]
+                    if key in group:
+                        dset = group[key]
+                        hydro[key] = dset[:, :, :]
             else:
                 # Slice based on data order (norms_hdf5 maps direction to axis)
                 axis_idx = self.norms_hdf5[self.normal]
                 for key in keys:
-                    dset = group[key]
-                    if axis_idx == 0:
-                        hydro[key] = dset[self.plane_index, :, :]
-                    elif axis_idx == 1:
-                        hydro[key] = dset[:, self.plane_index, :]
-                    else:  # axis_idx == 2
-                        hydro[key] = dset[:, :, self.plane_index]
+                    if key in group:
+                        dset = group[key]
+                        if axis_idx == 0:
+                            hydro[key] = dset[self.plane_index, :, :]
+                        elif axis_idx == 1:
+                            hydro[key] = dset[:, self.plane_index, :]
+                        else:  # axis_idx == 2
+                            hydro[key] = dset[:, :, self.plane_index]
 
         return hydro
 
     def read_hydro(self, vname, tindex):
-        """Read hydro data from file
+        """Read the hydro data of one species
 
         Args:
-            vname (string): variable name
+            vname (string): variable name in format "species-var" (e.g., "electron-txx")
             tindex (int): time index
         """
-        if vname in self.ehydro_list:
-            pmass = 1.0
-            if config.turbulence_mixing:
-                hydro = self.read_hydro_species(vname, tindex, "electronTop")
-                hydro_bot = self.read_hydro_species(vname, tindex,
-                                                    "electronBot")
-                for var in hydro:
-                    hydro[var] += hydro_bot[var]
-            else:
-                hydro = self.read_hydro_species(vname, tindex, "electron")
-        else:
-            pmass = config.vpic_info["mi/me"]
-            if config.turbulence_mixing:
-                hydro = self.read_hydro_species(vname, tindex, "ionTop")
-                hydro_bot = self.read_hydro_species(vname, tindex, "ionBot")
-                for var in hydro:
-                    hydro[var] += hydro_bot[var]
-            else:
-                hydro = self.read_hydro_species(vname, tindex, "ion")
+        # Split variable name to get species and actual variable
+        splits = vname.split("-")
+        species = splits[0]
+        var = splits[1]
 
-        if self.integrate_normal:
-            if vname[0] == 'n':  # number density
-                field_2d = np.sum(np.abs(hydro["rho"]),
-                                  axis=self.norms_hdf5[self.normal])
-            elif vname[0] == 'v':  # velocity
-                field_2d = np.sum(hydro["j" + vname[-1]] / hydro["rho"],
-                                  axis=self.norms_hdf5[self.normal])
-            elif vname[0] == 'u':  # four-velocity
-                field_2d = np.sum(hydro["p" + vname[-1]] /
-                                  (pmass * np.abs(hydro["rho"])),
-                                  axis=self.norms_hdf5[self.normal])
-            else:  # pressure tensor
-                vtmp = "t" + vname[2:]
-                if vtmp in hydro:
-                    tvar = vtmp
-                else:
-                    tvar = "t" + vname[-1] + vname[-2]
-                jvar = "j" + vname[-2]
-                pvar = "p" + vname[-1]
-                field_2d = np.sum(hydro[tvar] -
-                                  (hydro[jvar] / hydro["rho"]) * hydro[pvar],
-                                  axis=self.norms_hdf5[self.normal])
-            dcell = self.vpic_domain["d" + self.normal]
-            field_2d *= dcell
+        # Determine file path
+        if config.smoothed_data:
+            fdir = "../" + config.dir_smooth_data + "/"
         else:
-            if vname[0] == 'n':  # number density
-                field_2d = np.abs(hydro["rho"])
-            elif vname[0] == 'v':  # velocity
-                field_2d = hydro["j" + vname[-1]] / hydro["rho"]
-            elif vname[0] == 'u':  # four-velocity
-                field_2d = hydro["p" + vname[-1]] / (pmass * np.abs(hydro["rho"]))
-            else:  # pressure tensor
-                vtmp = "t" + vname[2:]
-                if vtmp in hydro:
-                    tvar = vtmp
-                else:
-                    tvar = "t" + vname[-1] + vname[-2]
-                jvar = "j" + vname[-2]
-                pvar = "p" + vname[-1]
-                field_2d = hydro[tvar] - (hydro[jvar] / hydro["rho"]) * hydro[pvar]
+            if config.time_averaged_field:
+                fdir = "../hydro-avg-hdf5/T." + str(tindex) + "/"
+            else:
+                fdir = "../hydro_hdf5/T." + str(tindex) + "/"
+        fname = fdir + "hydro_" + species + "_" + str(tindex) + ".h5"
+
+        # Read the variable directly from the file
+        with h5py.File(fname, "r") as fh:
+            group = fh["Timestep_" + str(tindex)]
+            dset = group[var]
+            if self.integrate_normal:
+                dcell = self.vpic_domain["d" + self.normal]
+                field_2d = np.sum(dset[:, :, :],
+                                  axis=self.norms_hdf5[self.normal]) * dcell
+            else:
+                # Slice based on data order (norms_hdf5 maps direction to axis)
+                axis_idx = self.norms_hdf5[self.normal]
+                if axis_idx == 0:
+                    field_2d = dset[self.plane_index, :, :]
+                elif axis_idx == 1:
+                    field_2d = dset[:, self.plane_index, :]
+                else:  # axis_idx == 2
+                    field_2d = dset[:, :, self.plane_index]
+
         return field_2d
 
     def get_jdote(self, tindex):
@@ -1706,7 +1724,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             tuple: (field_2d, field_3d) for 2D and 3D data
         """
         if config.hdf5_fields:
-            fdir = "../hydro-int-hdf5/T." + str(tindex) + "/"
+            fdir = "../" + config.dir_beta_hdf5 + "/T." + str(tindex) + "/"
             fname = fdir + "hydro_beta_" + str(tindex) + ".h5"
 
             try:
@@ -1824,6 +1842,82 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     self.field_2d = dcell * np.sum(self.field_3d,
                                                    axis=self.norms_gda[self.normal]).T
 
+    def read_magnetic_field(self, tindex):
+        """Read magnetic field from file
+
+        Args:
+            tindex (int): time index
+        """
+        if config.hdf5_fields:
+            self.bh_2d = self.read_fields("cb" + self.hv[0], tindex)
+            self.bv_2d = self.read_fields("cb" + self.hv[1], tindex)
+            # Try to read cb*0 fields if they exist (background/initial fields)
+            try:
+                self.bh_2d += self.read_fields("cb" + self.hv[0] + "0", tindex)
+                self.bv_2d += self.read_fields("cb" + self.hv[1] + "0", tindex)
+            except KeyError:
+                # cb*0 fields don't exist, skip them
+                pass
+        else:
+            self.bh_2d, self.bh_3d = self.read_gda_file(
+                "b" + self.hv[0], self.gda_path, tindex)
+            self.bv_2d, self.bv_3d = self.read_gda_file(
+                "b" + self.hv[1], self.gda_path, tindex)
+            if self.integrate_normal:
+                dcell = self.vpic_domain["d" + self.normal]
+                self.bh_2d = dcell * np.sum(self.bh_3d,
+                                            axis=self.norms_gda[self.normal]).T
+                self.bv_2d = dcell * np.sum(self.bv_3d,
+                                            axis=self.norms_gda[self.normal]).T
+
+    def plot_field_line(self):
+        """Plot magnetic field lines using streamplot"""
+        if self.field_line_plot:
+            self.field_line_plot.lines.remove()
+            for art in self.canvas.ax_main.get_children():
+                if not isinstance(art, mpl.patches.FancyArrowPatch):
+                    continue
+                art.remove()
+
+        # Handle transpose based on data order
+        # For "zyx" order: data is already in correct shape (ny, nx) for streamplot
+        # For "xyz" order: data needs transpose from (nx, ny) to (ny, nx)
+        if config.hdf5_data_order == "zyx":
+            bh_plot = self.bh_2d
+            bv_plot = self.bv_2d
+        else:
+            bh_plot = self.bh_2d.T
+            bv_plot = self.bv_2d.T
+
+        # Create grids that match the actual data dimensions
+        # This handles cases where data has been smoothed or processed
+        h_coord = self.hv[0]
+        v_coord = self.hv[1]
+
+        # Get the actual data shape (streamplot expects shape (len(Y), len(X)))
+        ny_data, nx_data = bh_plot.shape
+
+        # Create coordinate grids matching the actual data dimensions
+        h_min = self.vpic_domain[h_coord + "min"]
+        h_max = self.vpic_domain[h_coord + "max"]
+        v_min = self.vpic_domain[v_coord + "min"]
+        v_max = self.vpic_domain[v_coord + "max"]
+
+        xgrid = np.linspace(h_min, h_max, nx_data)
+        ygrid = np.linspace(v_min, v_max, ny_data)
+
+        self.field_line_plot = self.canvas.ax_main.streamplot(
+            xgrid,
+            ygrid,
+            bh_plot,
+            bv_plot,
+            density=1.0,
+            linewidth=0.5,
+            arrowsize=0.5,
+            broken_streamlines=True,
+            color='k')
+        self.canvas.draw()
+
     def update_plot(self):
         if self.fix_cbar_range:
             dmin = float(self.cbar_min_LineEdit.text())
@@ -1900,6 +1994,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                         aspect='auto',
                                         origin='lower',
                                         interpolation='none')
+        if self.field_line_plot:
+            self.plot_field_line()
         if self.tracer_plot:
             self.plot_tracer()
         self.canvas.ax_cbar.clear()
@@ -2079,6 +2175,8 @@ For more information, see the README or config_example.yaml
                         help='Force smoothed data mode')
     parser.add_argument('--no-smooth', action='store_true',
                         help='Force non-smoothed data mode')
+    parser.add_argument('--beta-dir', type=str,
+                        help='Beta diagnostics directory name (e.g., "hydro-int-hdf5")')
     parser.add_argument('--tmin', type=int,
                         help='Minimum time frame')
     parser.add_argument('--tmax', type=int,
@@ -2124,6 +2222,9 @@ def main():
     elif args.no_smooth:
         config.smoothed_data = False
         config.smooth_factor = 1
+
+    if args.beta_dir:
+        config.dir_beta_hdf5 = args.beta_dir
 
     if args.tmin is not None:
         config.tmin = args.tmin
