@@ -4,6 +4,7 @@ Quick check of VPIC output
 """
 import argparse
 import errno
+import glob
 import math
 import os
 import sys
@@ -82,6 +83,129 @@ def get_vpic_info(info_file: str = '../info') -> Dict[str, float]:
     return vpic_info
 
 
+def get_vpic_info_log(hdf5_fields: bool = True,
+                       log_file: str = "../vpic.out",
+                       dir_fields: str = "field_hdf5") -> Dict[str, float]:
+    """Get information of the VPIC simulation from log file.
+
+    This function reads VPIC parameters from the log file (vpic.out) when
+    the info file is not available. This is useful for older simulations
+    or hybridVPIC runs.
+
+    Args:
+        hdf5_fields: whether data is in HDF5 format
+        log_file: path to the VPIC log file
+        dir_fields: field directory name (field_hdf5, fields_hdf5, etc.)
+
+    Returns:
+        Dictionary containing VPIC simulation parameters
+
+    Raises:
+        FileNotFoundError: If log file doesn't exist
+        ValueError: If log file format is invalid
+    """
+    log_path = Path(log_file)
+    if not log_path.exists():
+        raise FileNotFoundError(
+            f"VPIC log file not found: {log_file}\n"
+            f"Please ensure the log file exists or specify the correct path."
+        )
+
+    try:
+        with open(log_path) as f:
+            content = f.readlines()
+    except Exception as e:
+        raise ValueError(f"Failed to read log file {log_file}: {e}")
+
+    vpic_info = {}
+    iline = 0
+    nlines = len(content)
+
+    # Find the "System of units" section
+    while iline < nlines:
+        line = content[iline]
+        if "System of units" in line:
+            break
+        iline += 1
+
+    # Parse parameters
+    while iline < nlines:
+        line = content[iline]
+        if "=" in line and "start" not in line:
+            try:
+                if "," not in line:
+                    # Single variable per line
+                    line_splits = line.split(":")
+                    if len(line_splits) > 1:
+                        var = line_splits[1].split("=")
+                        if len(var) > 1:
+                            vpic_info[var[0].strip()] = float(var[1].strip())
+                else:
+                    # Multiple variables per line
+                    line_splits = line.split(":")
+                    if len(line_splits) > 1:
+                        data1 = line_splits[1].split("\n")
+                        data2 = data1[0].split(",")
+                        for var_data in data2:
+                            var = var_data.split("=")
+                            if len(var) > 1:
+                                vpic_info[var[0].strip()] = float(var[1].strip())
+            except (IndexError, ValueError) as e:
+                print(f"Warning: Could not parse line in log file: {line.strip()}")
+        iline += 1
+
+    # Get the intervals from output data
+    try:
+        if hdf5_fields:
+            # Check for fields and hydro directories
+            outputs = ["fields", "hydro"]
+            for output in outputs:
+                # Try different directory naming conventions
+                possible_dirs = [
+                    f"../{output}_hdf5",
+                    f"../{dir_fields.replace('field', output)}",
+                ]
+
+                for dir_path in possible_dirs:
+                    if os.path.exists(dir_path):
+                        try:
+                            file_list = os.listdir(dir_path)
+                            tframes = []
+                            for file_name in file_list:
+                                if "T." in file_name:
+                                    fsplit = file_name.split(".")
+                                    tindex = int(fsplit[-1])
+                                    tframes.append(tindex)
+                            if len(tframes) > 1:
+                                tframes = np.sort(np.asarray(tframes))
+                                vpic_info[output + "_interval"] = int(tframes[1] - tframes[0])
+                            break
+                        except Exception as e:
+                            print(f"Warning: Could not determine {output} interval: {e}")
+        else:
+            # For gda format
+            bx_list = [os.path.basename(x) for x in glob.glob('../data/bx*.gda')]
+            if len(bx_list) == 1:  # all steps in the same file
+                vpic_info["fields_interval"] = 1
+                vpic_info["hydro_interval"] = 1
+            elif len(bx_list) > 1:
+                tframes = []
+                for file_name in bx_list:
+                    fsplit = file_name.split(".")
+                    fsplit2 = fsplit[0].split("_")
+                    if len(fsplit2) > 1:
+                        tindex = int(fsplit2[1])
+                        tframes.append(tindex)
+                if len(tframes) > 1:
+                    tframes = np.sort(np.asarray(tframes))
+                    vpic_info["fields_interval"] = int(tframes[1] - tframes[0])
+                    vpic_info["hydro_interval"] = vpic_info["fields_interval"]
+    except Exception as e:
+        print(f"Warning: Could not determine output intervals: {e}")
+
+    return vpic_info
+
+
 def mkdir_p(path: str) -> None:
     """Create directory with parents, ignore if exists.
 
@@ -103,6 +227,7 @@ class Config:
 
     vpic_info: Dict[str, float] = field(default_factory=dict)
     info_file: str = "../info"
+    log_file: str = "../vpic.out"  # VPIC log file (fallback if info file not found)
     hdf5_fields: bool = True
     smoothed_data: bool = True
     smooth_factor: int = 2
@@ -130,10 +255,20 @@ class Config:
         if not self.vpic_info:
             try:
                 self.vpic_info = get_vpic_info(self.info_file)
-            except FileNotFoundError as e:
-                print(f"Error: {e}")
-                print("Using empty vpic_info. Some features may not work correctly.")
-                self.vpic_info = {}
+            except FileNotFoundError:
+                # Try to read from log file as fallback
+                print(f"Info file '{self.info_file}' not found, trying to read from log file '{self.log_file}'...")
+                try:
+                    self.vpic_info = get_vpic_info_log(
+                        hdf5_fields=self.hdf5_fields,
+                        log_file=self.log_file,
+                        dir_fields=self.dir_fields_hdf5
+                    )
+                    print(f"Successfully loaded VPIC info from log file '{self.log_file}'.")
+                except (FileNotFoundError, ValueError) as e:
+                    print(f"Error: Could not read from log file '{self.log_file}': {e}")
+                    print("Using empty vpic_info. Some features may not work correctly.")
+                    self.vpic_info = {}
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> 'Config':
@@ -1793,6 +1928,8 @@ For more information, see the README or config_example.yaml
                         help='Path to configuration YAML file')
     parser.add_argument('--info-file', type=str, default='../info',
                         help='Path to VPIC info file (default: ../info)')
+    parser.add_argument('--log-file', type=str, default='../vpic.out',
+                        help='Path to VPIC log file (default: ../vpic.out)')
     parser.add_argument('--hdf5', action='store_true',
                         help='Force HDF5 field format')
     parser.add_argument('--gda', action='store_true',
@@ -1832,6 +1969,9 @@ def main():
             config.vpic_info = get_vpic_info(args.info_file)
         except Exception as e:
             print(f"Warning: Could not load info file: {e}")
+
+    if args.log_file:
+        config.log_file = args.log_file
 
     if args.hdf5:
         config.hdf5_fields = True

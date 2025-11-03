@@ -16,7 +16,7 @@ data:
 # Time parameters
 time:
   tmin: 0                    # Minimum time frame
-  tmax: 52                   # Maximum time frame
+  tmax: 125                  # Maximum time frame
   animation_tinterval: 100   # Animation interval in milliseconds
 
 # Tracer particle settings
@@ -24,5 +24,6 @@ tracer:
   filepath: "/home/cannon/Research/quick_check_vpic/vpic-sorter/data/2D-Lx150-bg0.2-150ppc/"
   filename: "electrons_ntraj1000_10emax.h5p"
 
-# VPIC simulation info file
+# VPIC simulation info files
 info_file: "../info"         # Path to VPIC info file (relative to working directory)
+log_file: "../vpic.out"      # Path to VPIC log file (fallback if info file not found)

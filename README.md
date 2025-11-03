@@ -39,6 +39,44 @@ pip install pyyaml  # For YAML configuration files
 
 **Perlmutter@NERSC**: Use a conda environment and access via [NERSC ThinLinc](https://docs.nersc.gov/connect/thinlinc/) for better performance. ThinLinc provides a remote desktop environment that is much faster than X11 forwarding over SSH. See [NERSC Python docs](https://docs.nersc.gov/development/languages/python/nersc-python/) for setting up your Python environment.
 
+### HPC Offline Installation
+
+For HPC systems without internet access (e.g., air-gapped or restricted networks), you can prepare packages offline:
+
+#### On a machine with internet access:
+
+```bash
+# Create a directory for wheels
+mkdir wheelhouse
+cd wheelhouse
+
+# Download all required packages
+pip download numpy matplotlib h5py PySide6 pyyaml
+```
+
+#### Transfer to HPC and install:
+
+```bash
+# Copy the wheelhouse directory to your HPC system
+# Then on the HPC system:
+pip install --no-index --find-links=wheelhouse -r requirements.txt
+```
+
+Create a `requirements.txt` file:
+```
+numpy>=1.22
+matplotlib>=3.6
+h5py>=3
+PySide6==6.4.3
+pyyaml
+```
+
+**Note**: Make sure to download wheels for the correct Python version and platform that matches your HPC system. You can specify the platform when downloading:
+
+```bash
+pip download --platform manylinux2014_x86_64 --python-version 3.10 --only-binary=:all: numpy matplotlib h5py PySide6 pyyaml
+```
+
 ## Quick Start
 
 ### 1. Auto-Detection Mode (Easiest - **NEW!**)
@@ -131,8 +169,9 @@ tracer:
   filepath: "/path/to/tracer/data/"
   filename: "electrons_ntraj1000_10emax.h5p"
 
-# VPIC simulation info file
+# VPIC simulation info files
 info_file: "../info"         # Path to VPIC info file
+log_file: "../vpic.out"      # Path to VPIC log file (fallback if info file not found)
 ```
 
 ## Usage Guide
@@ -184,13 +223,15 @@ Configure tracer paths in `config.yaml` or set `tracer_filepath` and `tracer_fil
 
 ```
 usage: quick_check_vpic.py [-h] [-c CONFIG] [--info-file INFO_FILE]
-                           [--hdf5] [--gda] [--smooth] [--no-smooth]
-                           [--tmin TMIN] [--tmax TMAX] [--no-auto-detect]
+                           [--log-file LOG_FILE] [--hdf5] [--gda]
+                           [--smooth] [--no-smooth] [--tmin TMIN]
+                           [--tmax TMAX] [--no-auto-detect]
 
 Options:
   -h, --help            Show help message
   -c, --config CONFIG   Path to YAML configuration file
   --info-file INFO_FILE Path to VPIC info file (default: ../info)
+  --log-file LOG_FILE   Path to VPIC log file (default: ../vpic.out)
   --hdf5                Force HDF5 field format
   --gda                 Force GDA field format
   --smooth              Force smoothed data mode
@@ -206,7 +247,8 @@ Expected directory structure (from run directory):
 
 ```
 run_directory/
-├── info                    # VPIC simulation info
+├── info                    # VPIC simulation info (preferred)
+├── vpic.out               # VPIC log file (fallback if info missing)
 ├── field_hdf5/            # HDF5 fields (old VPIC) or
 ├── fields_hdf5/           # HDF5 fields (new VPIC) or
 ├── data/                  # GDA fields
@@ -224,7 +266,11 @@ run_directory/
 
 ### "VPIC info file not found"
 
-Ensure `../info` exists relative to where you run the script, or specify:
+The tool will automatically try to read from `../vpic.out` log file if the `info` file is not found. This is useful for:
+- Older simulations that don't have an `info` file
+- hybridVPIC runs that output parameters to the log file
+
+If both files are missing, ensure one exists relative to where you run the script, or specify:
 
 ```bash
 python quick_check_vpic.py --info-file /path/to/info
@@ -372,6 +418,10 @@ Please submit issues on GitHub or contact the maintainer:
 
 ## Version History
 
+- **v2.1**:
+  - Added support for reading VPIC info from `vpic.out` log file (fallback when `info` file is missing)
+  - Added HPC offline package installation documentation
+  - Improved compatibility with hybridVPIC simulations
 - **v2.0**: Refactored with configuration system, auto-detection, type hints, and bug fixes
 - **v1.x**: Original implementation
 
