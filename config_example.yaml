@@ -12,6 +12,10 @@ data:
   momentum_field: true       # Whether momentum and kinetic energy data are dumped
   time_averaged_field: false # Whether it is time-averaged field
   turbulence_mixing: false   # Whether it has turbulence mixing diagnostics
+  auto_detect_species: true  # Auto-detect particle species from hydro files (recommended)
+  # species_list: ["electron", "H"]  # Manually specify species (only used if auto_detect_species is false)
+  # For hybridVPIC with multiple ion species, use auto_detect_species: true or specify like:
+  # species_list: ["ion", "dion", "hion"]
 
 # Time parameters
 time:

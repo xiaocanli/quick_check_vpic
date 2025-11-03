@@ -237,6 +237,8 @@ class Config:
     momentum_field: bool = True
     time_averaged_field: bool = False
     turbulence_mixing: bool = False
+    auto_detect_species: bool = True  # Auto-detect species from hydro files
+    species_list: List[str] = field(default_factory=list)  # Manually specify species if not auto-detecting
     tmin: int = 0
     tmax: int = 52
     animation_tinterval: int = 100
@@ -1159,29 +1161,77 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
     def raw_plot_variables(self):
         if config.hdf5_fields:
-            self.fields_list = ["cbx", "cby", "cbz", "absb", "ex", "ey", "ez"]
+            # Read fields from HDF5 file dynamically
+            if config.smoothed_data:
+                fdir = "../" + config.dir_smooth_data + "/"
+            else:
+                if config.time_averaged_field:
+                    fdir = "../fields-avg-hdf5/T.0/"
+                else:
+                    fdir = "../" + config.dir_fields_hdf5 + "/T.0/"
+            fname = fdir + "fields_0.h5"
+
+            try:
+                with h5py.File(fname, "r") as fh:
+                    group = fh["Timestep_0"]
+                    self.fields_list = list(group.keys())
+                self.fields_list.append("absb")  # Computed field
+            except Exception as e:
+                print(f"Warning: Could not read fields file {fname}: {e}")
+                print("Using default field list")
+                self.fields_list = ["cbx", "cby", "cbz", "absb", "ex", "ey", "ez"]
+
+            # Detect species and read hydro data
+            if config.smoothed_data:
+                hydro_dir = "../" + config.dir_smooth_data + "/"
+            else:
+                if config.time_averaged_field:
+                    hydro_dir = "../hydro-avg-hdf5/T.0/"
+                else:
+                    hydro_dir = "../hydro_hdf5/T.0/"
+
+            self.hydro_list = []
             self.jlist = ["jx", "jy", "jz", "absj"]
-            self.ehydro_list = [
-                "ne", "vex", "vey", "vez", "pexx", "pexy", "pexz", "peyx",
-                "peyy", "peyz", "pezx", "pezy", "pezz"
-            ]
-            self.Hhydro_list = [
-                "ni", "vix", "viy", "viz", "pixx", "pixy", "pixz", "piyx",
-                "piyy", "piyz", "pizx", "pizy", "pizz"
-            ]
-            if config.momentum_field:
-                self.ehydro_list += [
-                    "uex",
-                    "uey",
-                    "uez",
-                ]
-                self.Hhydro_list += [
-                    "uix",
-                    "uiy",
-                    "uiz",
-                ]
-            self.hydro_list = self.jlist + self.ehydro_list + self.Hhydro_list
-            self.var_list = self.fields_list + self.hydro_list
+
+            if config.auto_detect_species:
+                # Auto-detect species from hydro files
+                detected_species = []
+                if os.path.exists(hydro_dir):
+                    try:
+                        files = os.listdir(hydro_dir)
+                        # Look for hydro_<species>_0.h5 files
+                        for fname in files:
+                            if fname.startswith("hydro_") and fname.endswith("_0.h5"):
+                                # Extract species name
+                                species = fname.replace("hydro_", "").replace("_0.h5", "")
+                                detected_species.append(species)
+                        detected_species = sorted(set(detected_species))
+                        if detected_species:
+                            print(f"Auto-detected species: {', '.join(detected_species)}")
+                    except Exception as e:
+                        print(f"Warning: Could not auto-detect species from {hydro_dir}: {e}")
+
+                if not detected_species:
+                    print("Warning: No species detected, using default: electron, H")
+                    detected_species = ["electron", "H"]
+            else:
+                # Use manually specified species list
+                detected_species = config.species_list if config.species_list else ["electron", "H"]
+                print(f"Using configured species: {', '.join(detected_species)}")
+
+            # Read variables from each species' hydro file
+            for species in detected_species:
+                fname = hydro_dir + f"hydro_{species}_0.h5"
+                try:
+                    with h5py.File(fname, "r") as fh:
+                        group = fh["Timestep_0"]
+                        for var in group.keys():
+                            self.hydro_list.append(species + "-" + var)
+                except Exception as e:
+                    print(f"Warning: Could not read hydro file for species '{species}': {e}")
+                    print(f"Skipping species '{species}'")
+
+            self.var_list = self.fields_list + self.jlist + self.hydro_list
             self.var_list = sorted(set(self.var_list))
         else:
             flist = [

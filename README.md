@@ -9,7 +9,8 @@ Interactive visualization tool for VPIC (Vector Particle-In-Cell) simulation dat
 - **Animation** support for time series
 - **Tracer particle** visualization with energy evolution
 - **Flexible configuration** via YAML files or command-line arguments
-- **Auto-detection** of data format and file structure
+- **Auto-detection** of data format, file structure, and particle species
+- **Multi-species support**: Automatically detects ion species from hydro files (ideal for hybridVPIC)
 
 ## Installation
 
@@ -157,6 +158,8 @@ data:
   momentum_field: true       # Momentum data available
   time_averaged_field: false # Time-averaged fields
   turbulence_mixing: false   # Turbulence mixing simulation
+  auto_detect_species: true  # Auto-detect species from hydro files (recommended for hybridVPIC)
+  # species_list: ["electron", "H"]  # Manually specify species (only if auto_detect_species is false)
 
 # Time parameters
 time:
@@ -173,6 +176,34 @@ tracer:
 info_file: "../info"         # Path to VPIC info file
 log_file: "../vpic.out"      # Path to VPIC log file (fallback if info file not found)
 ```
+
+### Species Detection (**NEW!**)
+
+The tool now automatically detects particle species from hydro files, making it compatible with both regular VPIC (with electrons) and hybridVPIC simulations (ion-only or multiple ion species).
+
+**Auto-detection (recommended)**:
+```yaml
+data:
+  auto_detect_species: true  # Automatically finds all species from hydro files
+```
+
+When enabled, the tool scans the hydro directory and discovers all available species (e.g., `electron`, `H`, `ion`, `dion`, `hion`). On startup, you'll see:
+```
+Auto-detected species: electron, H
+```
+
+**Manual specification**:
+For fine-grained control or when auto-detection doesn't work:
+```yaml
+data:
+  auto_detect_species: false
+  species_list: ["ion", "dion", "hion"]  # Specify exactly which species to load
+```
+
+**Use cases**:
+- **Regular VPIC**: Auto-detects `electron` and ion species (e.g., `H`, `He`)
+- **HybridVPIC**: Auto-detects multiple ion species (e.g., `ion`, `dion`, `hion`) without electrons
+- **Custom simulations**: Manually specify any species combination
 
 ## Usage Guide
 
@@ -418,10 +449,17 @@ Please submit issues on GitHub or contact the maintainer:
 
 ## Version History
 
+- **v2.2**:
+  - **Dynamic species detection**: Automatically detects particle species from hydro files
+  - Reads field and hydro variables dynamically from HDF5 files instead of hardcoding
+  - Full support for hybridVPIC with multiple ion species (ion-only simulations)
+  - Added `auto_detect_species` and `species_list` configuration options
+  - Compatible with simulations having arbitrary species combinations
 - **v2.1**:
   - Added support for reading VPIC info from `vpic.out` log file (fallback when `info` file is missing)
   - Added HPC offline package installation documentation
   - Improved compatibility with hybridVPIC simulations
+  - Configurable log file path
 - **v2.0**: Refactored with configuration system, auto-detection, type hints, and bug fixes
 - **v1.x**: Original implementation
 
