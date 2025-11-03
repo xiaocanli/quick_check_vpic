@@ -1219,7 +1219,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.plottype_comboBox.setItemText(
             2, "Contour+" + self.hv[0].upper() + "-Slice")
         self.plottype_comboBox.setItemText(
-            3, "Contour+" + self.hv[1].upper() + "-Slice")
+            3, "Contour+" + self.hv[1].upper() + "-Average")
+        self.plottype_comboBox.setItemText(
+            4, "Contour+" + self.hv[1].upper() + "-Slice")
         self.integrate_checkBox.setText("Integrate along " + self.normal.upper())
 
     def set_plane_index(self):
@@ -2052,7 +2054,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         orientation = "vertical"
         if ("Contour+" + self.hv[0].upper()) in self.plot_type:
             lhp *= 1.25
-        elif self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
+        elif ("Contour+" + self.hv[1].upper()) in self.plot_type:
             lvp *= 1.25
         denp = max(lhp / self.width_max, lvp / self.height_max)
         canvas_h = int(lhp / denp)
@@ -2061,7 +2063,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             canvas_h = self.width_max // 3
         if canvas_v < self.height_max // 3:
             canvas_v = self.height_max // 3
-        if self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
+        if ("Contour+" + self.hv[1].upper()) in self.plot_type:
             if canvas_v < self.height_max // 2:
                 canvas_v = self.height_max // 2
         canvas_l = self.middle - canvas_h // 2
@@ -2113,6 +2115,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             xlim = self.canvas.ax_main.get_xlim()
             self.canvas.ax_main.plot(xlim, [vslice, vslice], color='w')
             self.canvas.ax_main.set_xlim(xlim)
+        elif self.plot_type == "Contour+" + self.hv[1].upper() + "-Average":
+            self.field_1d = np.mean(self.field_2d[:, ivs:ive], axis=1)
         if ("Contour+" + self.hv[0].upper()) in self.plot_type:
             self.canvas.ax1d.clear()
             # Ensure indices are within field_1d bounds
@@ -2123,7 +2127,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.canvas.ax1d.plot(self.field_1d[ivs_clamp:ive_clamp],
                                   v_grid[ivs_clamp:ive_clamp])
             self.canvas.ax1d.set_ylim(self.canvas.ax_main.get_ylim())
-        elif self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
+        elif ("Contour+" + self.hv[1].upper()) in self.plot_type:
             self.canvas.ax1d.clear()
             # Ensure indices are within field_1d bounds
             ihs_clamp = min(ihs, len(self.field_1d))
@@ -2139,7 +2143,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         xlabel_suffix = f"/{scale_label}" if scale_label else ""
         ylabel_suffix = f"/{scale_label}" if scale_label else ""
 
-        if self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
+        if ("Contour+" + self.hv[1].upper()) in self.plot_type:
             self.canvas.ax1d.set_xlabel(r"$" + h + xlabel_suffix + "$", fontsize=12)
         else:
             self.canvas.ax_main.set_xlabel(r"$" + h + xlabel_suffix + "$", fontsize=12)

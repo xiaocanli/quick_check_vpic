@@ -3,7 +3,7 @@
 ################################################################################
 ## Form generated from reading UI file 'mainwindow.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.6.1
+## Created by: Qt User Interface Compiler version 6.4.3
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
@@ -69,6 +69,7 @@ class Ui_MainWindow(object):
         self.verticalLayout.addLayout(self.horizontalLayout_4)
 
         self.plottype_comboBox = QComboBox(self.layoutWidget)
+        self.plottype_comboBox.addItem("")
         self.plottype_comboBox.addItem("")
         self.plottype_comboBox.addItem("")
         self.plottype_comboBox.addItem("")
@@ -738,8 +739,9 @@ class Ui_MainWindow(object):
 
         self.plottype_comboBox.setItemText(0, QCoreApplication.translate("MainWindow", u"Contour", None))
         self.plottype_comboBox.setItemText(1, QCoreApplication.translate("MainWindow", u"Contour+X-Average", None))
-        self.plottype_comboBox.setItemText(2, QCoreApplication.translate("MainWindow", u"Contour+Z-Slice", None))
-        self.plottype_comboBox.setItemText(3, QCoreApplication.translate("MainWindow", u"Contour+X-Slice", None))
+        self.plottype_comboBox.setItemText(2, QCoreApplication.translate("MainWindow", u"Contour+X-Slice", None))
+        self.plottype_comboBox.setItemText(3, QCoreApplication.translate("MainWindow", u"Contour+Z-Average", None))
+        self.plottype_comboBox.setItemText(4, QCoreApplication.translate("MainWindow", u"Contour+Z-Slice", None))
 
         self.integrate_checkBox.setText(QCoreApplication.translate("MainWindow", u"Integrate along Y", None))
         self.label_2.setText(QCoreApplication.translate("MainWindow", u"Raw Plot", None))

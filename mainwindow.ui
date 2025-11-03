@@ -92,12 +92,17 @@
          </item>
          <item>
           <property name="text">
-           <string>Contour+Z-Slice</string>
+           <string>Contour+X-Slice</string>
           </property>
          </item>
          <item>
           <property name="text">
-           <string>Contour+X-Slice</string>
+           <string>Contour+Z-Average</string>
+          </property>
+         </item>
+         <item>
+          <property name="text">
+           <string>Contour+Z-Slice</string>
           </property>
          </item>
         </widget>
