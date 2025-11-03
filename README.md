@@ -43,6 +43,31 @@ pip install pyyaml  # For YAML configuration files
 
 **Perlmutter@NERSC**: Use a conda environment and access via [NERSC ThinLinc](https://docs.nersc.gov/connect/thinlinc/) for better performance. ThinLinc provides a remote desktop environment that is much faster than X11 forwarding over SSH. See [NERSC Python docs](https://docs.nersc.gov/development/languages/python/nersc-python/) for setting up your Python environment.
 
+### Qt Environment Setup
+
+For the GUI to work properly, you may need to set these environment variables:
+
+```bash
+export QT_API=PySide6
+export QT_PLUGIN_PATH=~/.local/lib/python3.12/site-packages/PySide6/Qt/plugins/
+```
+
+> [!CAUTION]
+> You might have a different version of Python. Adjust the path accordingly (e.g., `python3.11`, `python3.9`, etc.).
+
+If you encounter the error `qt.qpa.plugin: Could not find the Qt platform plugin "xcb"`, set these variables before running the program. You can add them to your `~/.bashrc` or `~/.bash_profile` for persistence:
+
+```bash
+echo 'export QT_API=PySide6' >> ~/.bashrc
+echo 'export QT_PLUGIN_PATH=~/.local/lib/python3.12/site-packages/PySide6/Qt/plugins/' >> ~/.bashrc
+source ~/.bashrc
+```
+
+To find your correct Qt plugin path:
+```bash
+python3 -c "from PySide6.QtCore import QLibraryInfo; print(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))"
+```
+
 ### HPC Offline Installation
 
 For HPC systems without internet access (e.g., air-gapped or restricted networks), you can prepare packages offline:
@@ -309,6 +334,37 @@ run_directory/
 ```
 
 ## Troubleshooting
+
+### "Could not find the Qt platform plugin 'xcb'"
+
+This error occurs when Qt cannot find its platform plugins. This is common on HPC systems or when using X11 forwarding.
+
+**Solution 1: Set Qt plugin path**
+```bash
+export QT_API=PySide6
+export QT_PLUGIN_PATH=~/.local/lib/python3.12/site-packages/PySide6/Qt/plugins/
+python3 quick_check_vpic.py
+```
+
+**Solution 2: Use ThinLinc or VNC** (Recommended for HPC)
+- At NERSC: Use [ThinLinc](https://docs.nersc.gov/connect/thinlinc/) instead of X11 forwarding
+- Other HPC centers: Use VNC or remote desktop services
+
+**Solution 3: Reinstall PySide6**
+```bash
+pip uninstall PySide6
+pip install PySide6
+```
+
+**Solution 4: Check display settings**
+```bash
+echo $DISPLAY  # Should show something like :0 or localhost:10.0
+```
+
+If DISPLAY is not set and you're on a remote system, you may need to enable X11 forwarding:
+```bash
+ssh -X user@hostname  # Or use -Y for trusted X11 forwarding
+```
 
 ### "VPIC info file not found"
 
