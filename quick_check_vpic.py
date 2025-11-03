@@ -80,7 +80,7 @@ def get_vpic_info(info_file: str = '../info') -> Dict[str, float]:
             print(f"Warning: Could not parse line in info file: {line.strip()}")
             continue
 
-    return vpic_info
+    return normalize_box_size_params(vpic_info)
 
 
 def get_vpic_info_log(hdf5_fields: bool = True,
@@ -202,6 +202,68 @@ def get_vpic_info_log(hdf5_fields: bool = True,
                     vpic_info["hydro_interval"] = vpic_info["fields_interval"]
     except Exception as e:
         print(f"Warning: Could not determine output intervals: {e}")
+
+    return normalize_box_size_params(vpic_info)
+
+
+def normalize_box_size_params(vpic_info: Dict[str, float]) -> Dict[str, float]:
+    """Normalize box size parameters to use /de convention.
+
+    HybridVPIC simulations may use different conventions:
+    - Full VPIC: Lx/de, Ly/de, Lz/de (electron scales)
+    - HybridVPIC: Lx/di, Ly/di, Lz/di (ion scales) OR just Lx, Ly, Lz
+
+    This function ensures Lx/de, Ly/de, Lz/de always exist by checking
+    for alternative names and using them as fallbacks. It also sets
+    'length_scale' to indicate which scale is being used ('de', 'di', or 'other').
+
+    Args:
+        vpic_info: Dictionary containing VPIC simulation parameters
+
+    Returns:
+        Updated dictionary with normalized parameter names and 'length_scale' key
+    """
+    # Detect which scale is used
+    if 'Lx/de' in vpic_info:
+        scale = 'de'
+    elif 'Lx/di' in vpic_info:
+        scale = 'di'
+    elif 'Lx' in vpic_info:
+        scale = 'other'
+    else:
+        scale = 'unknown'
+
+    vpic_info['length_scale'] = scale
+
+    # Normalize box size parameters (Lx, Ly, Lz)
+    for dim in ['x', 'y', 'z']:
+        key_de = f'L{dim}/de'
+        key_di = f'L{dim}/di'
+        key_plain = f'L{dim}'
+
+        # If /de version doesn't exist, use /di or plain version
+        if key_de not in vpic_info:
+            if key_di in vpic_info:
+                vpic_info[key_de] = vpic_info[key_di]
+                if dim == 'x':  # Only print once
+                    print(f"Info: Using ion scale (di) for length units")
+            elif key_plain in vpic_info:
+                vpic_info[key_de] = vpic_info[key_plain]
+                if dim == 'x':  # Only print once
+                    print(f"Info: Using plain length units (no scale suffix)")
+
+    # Normalize cell size parameters (dx, dy, dz)
+    for dim in ['x', 'y', 'z']:
+        key_de = f'd{dim}/de'
+        key_di = f'd{dim}/di'
+        key_plain = f'd{dim}'
+
+        # If /de version doesn't exist, use /di or plain version
+        if key_de not in vpic_info:
+            if key_di in vpic_info:
+                vpic_info[key_de] = vpic_info[key_di]
+            elif key_plain in vpic_info:
+                vpic_info[key_de] = vpic_info[key_plain]
 
     return vpic_info
 
@@ -1220,7 +1282,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
             self.hydro_list = []
             self.ehydro_list = []  # Electron hydro variables
-            self.jlist = ["jx", "jy", "jz", "absj"]
 
             if config.auto_detect_species:
                 # Auto-detect species from hydro files
@@ -1248,6 +1309,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 detected_species = config.species_list if config.species_list else ["electron", "H"]
                 print(f"Using configured species: {', '.join(detected_species)}")
 
+            # Store species list for later use (e.g., diagnostic plots)
+            self.species_list = detected_species
+
             # Read variables from each species' hydro file
             for species in detected_species:
                 fname = hydro_dir + f"hydro_{species}_0.h5"
@@ -1264,9 +1328,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     print(f"Warning: Could not read hydro file for species '{species}': {e}")
                     print(f"Skipping species '{species}'")
 
-            self.var_list = self.fields_list + self.jlist + self.hydro_list
+            self.var_list = self.fields_list + self.hydro_list
             self.var_list = sorted(set(self.var_list))
         else:
+            # For GDA format, use default species list
+            self.species_list = ["electron", "ion"]
             flist = [
                 _ for _ in os.listdir(self.gda_path) if _.endswith(".gda")
             ]
@@ -1287,7 +1353,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                               _translate("MainWindow", var))
 
     def diag_plot_variables(self):
-        self.diag_var_list = ["", "jdotE", "beta"]
+        self.diag_var_list = [""]
+        # Add per-species j.E diagnostics
+        if hasattr(self, 'species_list'):
+            for species in self.species_list:
+                self.diag_var_list.append(f"{species}-j.E")
+        self.diag_var_list.append("beta")
         if config.turbulence_mixing:
             self.diag_var_list.append("emix")
         _translate = QtCore.QCoreApplication.translate
@@ -1347,6 +1418,20 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.vpic_domain["zgrid"] = np.linspace(self.vpic_domain["zmin"] + hdz,
                                                 self.vpic_domain["zmax"] - hdz,
                                                 self.vpic_domain["nz"])
+
+    def get_length_scale_label(self):
+        """Get the appropriate length scale label for plot axes.
+
+        Returns:
+            str: Length scale label ('d_e', 'd_i', or empty string)
+        """
+        scale = config.vpic_info.get('length_scale', 'de')
+        if scale == 'de':
+            return 'd_e'
+        elif scale == 'di':
+            return 'd_i'
+        else:
+            return ''  # No scale suffix for plain length units
 
     def read_gda_file(self, vname, tindex):
         """read fields or hydro in gda format
@@ -1481,37 +1566,19 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         jsp = {}
         with h5py.File(fname, 'r') as fh:
             group = fh["Timestep_" + str(tindex)]
-            if vname == "absj":
-                # Read all three current density components for magnitude calculation
-                if self.integrate_normal:
-                    for var in ["jx", "jy", "jz"]:
-                        dset = group[var]
-                        jsp[var] = dset[:, :, :]
-                else:
-                    # Slice based on data order (norms_hdf5 maps direction to axis)
-                    axis_idx = self.norms_hdf5[self.normal]
-                    for var in ["jx", "jy", "jz"]:
-                        dset = group[var]
-                        if axis_idx == 0:
-                            jsp[var] = dset[self.plane_index, :, :]
-                        elif axis_idx == 1:
-                            jsp[var] = dset[:, self.plane_index, :]
-                        else:  # axis_idx == 2
-                            jsp[var] = dset[:, :, self.plane_index]
+            # Read specific current density component
+            dset = group[vname]
+            if self.integrate_normal:
+                jsp["jdir"] = dset[:, :, :]
             else:
-                # Read specific current density component
-                dset = group[vname]
-                if self.integrate_normal:
-                    jsp["jdir"] = dset[:, :, :]
-                else:
-                    # Slice based on data order (norms_hdf5 maps direction to axis)
-                    axis_idx = self.norms_hdf5[self.normal]
-                    if axis_idx == 0:
-                        jsp["jdir"] = dset[self.plane_index, :, :]
-                    elif axis_idx == 1:
-                        jsp["jdir"] = dset[:, self.plane_index, :]
-                    else:  # axis_idx == 2
-                        jsp["jdir"] = dset[:, :, self.plane_index]
+                # Slice based on data order (norms_hdf5 maps direction to axis)
+                axis_idx = self.norms_hdf5[self.normal]
+                if axis_idx == 0:
+                    jsp["jdir"] = dset[self.plane_index, :, :]
+                elif axis_idx == 1:
+                    jsp["jdir"] = dset[:, self.plane_index, :]
+                else:  # axis_idx == 2
+                    jsp["jdir"] = dset[:, :, self.plane_index]
         return jsp
 
     def read_current_density(self, vname, tindex):
@@ -1547,18 +1614,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         if self.integrate_normal:
             dcell = self.vpic_domain["d" + self.normal]
-            if vname == "absj":
-                field_2d = np.sum(
-                        np.sqrt(jsp["jx"]**2 + jsp["jy"]**2 + jsp["jz"]**2),
-                        axis=self.norms_hdf5[self.normal]) * dcell
-            else:
-                field_2d = np.sum(jsp["jdir"],
-                                  axis=self.norms_hdf5[self.normal]) * dcell
+            field_2d = np.sum(jsp["jdir"],
+                              axis=self.norms_hdf5[self.normal]) * dcell
         else:
-            if vname == "absj":
-                field_2d = np.sqrt(jsp["jx"]**2 + jsp["jy"]**2 + jsp["jz"]**2)
-            else:
-                field_2d = jsp["jdir"]
+            field_2d = jsp["jdir"]
 
         return field_2d
 
@@ -1680,19 +1739,43 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         return field_2d
 
-    def get_jdote(self, tindex):
-        """get the diagnostics data of j.E
+    def get_jdote_species(self, tindex, species):
+        """Get j.E for a specific species
+
+        Args:
+            tindex (int): time index
+            species (string): particle species name
+
+        Returns:
+            tuple: (field_2d, field_3d) - 2D and 3D j.E data
         """
         if config.hdf5_fields:
-            jx = self.read_current_density("jx", tindex)
-            jy = self.read_current_density("jy", tindex)
-            jz = self.read_current_density("jz", tindex)
+            # Read current density components for this species
+            jx_sp = self.read_current_density_species("jx", tindex, species)
+            jy_sp = self.read_current_density_species("jy", tindex, species)
+            jz_sp = self.read_current_density_species("jz", tindex, species)
+
+            # Handle integration along normal direction
+            if self.integrate_normal:
+                dcell = self.vpic_domain["d" + self.normal]
+                jx = np.sum(jx_sp["jdir"], axis=self.norms_hdf5[self.normal]) * dcell
+                jy = np.sum(jy_sp["jdir"], axis=self.norms_hdf5[self.normal]) * dcell
+                jz = np.sum(jz_sp["jdir"], axis=self.norms_hdf5[self.normal]) * dcell
+            else:
+                jx = jx_sp["jdir"]
+                jy = jy_sp["jdir"]
+                jz = jz_sp["jdir"]
+
+            # Read electric field components
             ex = self.read_fields("ex", tindex)
             ey = self.read_fields("ey", tindex)
             ez = self.read_fields("ez", tindex)
+
+            # Calculate j.E
             field_2d = jx * ex + jy * ey + jz * ez
             return field_2d, field_2d
         else:
+            # For GDA format, fall back to total current (not per-species)
             j2d, j3d = self.read_gda_file("jx", tindex)
             e2d, e3d = self.read_gda_file("ex", tindex)
             field_2d = j2d * e2d
@@ -1819,8 +1902,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             tindex (int): time index
         """
         if self.diag_plot:
-            if self.diag_var_name == "jdotE":
-                self.field_2d, self.field_3d = self.get_jdote(tindex)
+            if "-j.E" in self.diag_var_name:
+                # Extract species name from "<species>-j.E"
+                species = self.diag_var_name.replace("-j.E", "")
+                self.field_2d, self.field_3d = self.get_jdote_species(tindex, species)
             elif self.diag_var_name == "beta":
                 self.field_2d, self.field_3d = self.get_beta(tindex)
             elif self.diag_var_name == "emix":
@@ -1830,8 +1915,6 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             if config.hdf5_fields:
                 if vname in self.fields_list:  # electric and magnetic fields
                     self.field_2d = self.read_fields(vname, tindex)
-                elif vname in self.jlist:  # current density
-                    self.field_2d = self.read_current_density(vname, tindex)
                 else:  # density, velocity, momentum, pressure tensor
                     self.field_2d = self.read_hydro(vname, tindex)
             else:
@@ -2051,11 +2134,16 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                   self.field_1d[ihs_clamp:ihe_clamp])
             self.canvas.ax1d.set_xlim(self.canvas.ax_main.get_xlim())
 
+        # Get the appropriate length scale label
+        scale_label = self.get_length_scale_label()
+        xlabel_suffix = f"/{scale_label}" if scale_label else ""
+        ylabel_suffix = f"/{scale_label}" if scale_label else ""
+
         if self.plot_type == "Contour+" + self.hv[1].upper() + "-Slice":
-            self.canvas.ax1d.set_xlabel(r"$" + h + "/d_e$", fontsize=12)
+            self.canvas.ax1d.set_xlabel(r"$" + h + xlabel_suffix + "$", fontsize=12)
         else:
-            self.canvas.ax_main.set_xlabel(r"$" + h + "/d_e$", fontsize=12)
-        self.canvas.ax_main.set_ylabel(r"$" + v + "/d_e$", fontsize=12)
+            self.canvas.ax_main.set_xlabel(r"$" + h + xlabel_suffix + "$", fontsize=12)
+        self.canvas.ax_main.set_ylabel(r"$" + v + ylabel_suffix + "$", fontsize=12)
 
         # Trigger the canvas to update and redraw.
         self.canvas.draw()
@@ -2246,9 +2334,11 @@ def main():
     print(f"Time range: {config.tmin} - {config.tmax} ({config.nt} frames)")
     print(f"Info file: {config.info_file}")
     if config.vpic_info:
+        scale = config.vpic_info.get('length_scale', 'de')
+        scale_label = 'de' if scale == 'de' else ('di' if scale == 'di' else 'code units')
         print(f"Simulation domain: {config.vpic_info.get('Lx/de', '?')} x "
               f"{config.vpic_info.get('Ly/de', '?')} x "
-              f"{config.vpic_info.get('Lz/de', '?')} de")
+              f"{config.vpic_info.get('Lz/de', '?')} {scale_label}")
     print("="*60 + "\n")
 
     # Start Qt application

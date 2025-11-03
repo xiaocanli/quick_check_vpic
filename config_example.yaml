@@ -4,10 +4,10 @@
 # Data format and location
 data:
   hdf5_fields: true          # true for HDF5 format, false for GDA format
-  smoothed_data: true        # Whether data is smoothed
+  smoothed_data: false       # Whether data is smoothed
   smooth_factor: 2           # Smooth factor along each direction (only used if smoothed_data is true)
   dir_smooth_data: "data_smooth"  # Directory name for smoothed data
-  dir_fields_hdf5: "field_hdf5"   # Field directory name: "field_hdf5" (old) or "fields_hdf5" (new)
+  dir_fields_hdf5: "fields_hdf5"  # Field directory name: "field_hdf5" (old) or "fields_hdf5" (new)
   dir_beta_hdf5: "hydro-int-hdf5" # Beta diagnostics directory name (for hybridVPIC beta production data)
   hdf5_data_order: "xyz"     # HDF5 data organization: "xyz" (older VPIC) or "zyx" (newer VPIC)
   momentum_field: true       # Whether momentum and kinetic energy data are dumped
