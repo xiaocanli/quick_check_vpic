@@ -1254,7 +1254,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                               _translate("MainWindow", var))
 
     def diag_plot_variables(self):
-        self.diag_var_list = ["", "jdotE"]
+        self.diag_var_list = ["", "jdotE", "beta"]
         if config.turbulence_mixing:
             self.diag_var_list.append("emix")
         _translate = QtCore.QCoreApplication.translate
@@ -1693,6 +1693,95 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                                           axis=self.norms_gda[self.normal]).T
             return field_2d, field_3d
 
+    def get_beta(self, tindex):
+        """Get beta production diagnostics data.
+
+        Beta production is typically stored in hydro-int-hdf5 directory
+        for hybridVPIC simulations.
+
+        Args:
+            tindex (int): time index
+
+        Returns:
+            tuple: (field_2d, field_3d) for 2D and 3D data
+        """
+        if config.hdf5_fields:
+            fdir = "../hydro-int-hdf5/T." + str(tindex) + "/"
+            fname = fdir + "hydro_beta_" + str(tindex) + ".h5"
+
+            try:
+                with h5py.File(fname, "r") as fh:
+                    group = fh["Timestep_" + str(tindex)]
+                    dset = group["beta"]
+                    if self.integrate_normal:
+                        dcell = self.vpic_domain["d" + self.normal]
+                        field_2d = dcell * np.sum(dset[:, :, :],
+                                                  axis=self.norms_hdf5[self.normal])
+                    else:
+                        if config.hdf5_data_order == "zyx":
+                            # Newer VPIC format (nz, ny, nx)
+                            if self.normal == 'x':
+                                field_2d = dset[:, :, self.plane_index]
+                            elif self.normal == 'y':
+                                field_2d = dset[:, self.plane_index, :]
+                            else:
+                                field_2d = dset[self.plane_index, :, :]
+                        else:
+                            # Older VPIC format (nx, ny, nz)
+                            if self.normal == 'x':
+                                field_2d = dset[self.plane_index, :, :]
+                            elif self.normal == 'y':
+                                field_2d = dset[:, self.plane_index, :]
+                            else:
+                                field_2d = dset[:, :, self.plane_index]
+                return field_2d, field_2d
+            except FileNotFoundError:
+                print(f"Warning: Beta diagnostics file not found: {fname}")
+                print("Beta diagnostics are typically available in hybridVPIC simulations")
+                print("with hydro-int-hdf5 directory containing hydro_beta_*.h5 files")
+                # Return zeros with appropriate shape
+                if self.is_2d:
+                    nh = self.vpic_domain["n" + self.hv[0]]
+                    nv = self.vpic_domain["n" + self.hv[1]]
+                    field_2d = np.zeros((nh, nv))
+                else:
+                    nx = self.vpic_domain["nx"]
+                    ny = self.vpic_domain["ny"]
+                    field_2d = np.zeros((nx, ny))
+                return field_2d, field_2d
+            except Exception as e:
+                print(f"Error reading beta diagnostics: {e}")
+                # Return zeros with appropriate shape
+                if self.is_2d:
+                    nh = self.vpic_domain["n" + self.hv[0]]
+                    nv = self.vpic_domain["n" + self.hv[1]]
+                    field_2d = np.zeros((nh, nv))
+                else:
+                    nx = self.vpic_domain["nx"]
+                    ny = self.vpic_domain["ny"]
+                    field_2d = np.zeros((nx, ny))
+                return field_2d, field_2d
+        else:
+            # GDA format support (for older simulations)
+            try:
+                field_2d, field_3d = self.read_gda_file("ni-beta3", tindex)
+                if self.integrate_normal:
+                    dcell = self.vpic_domain["d" + self.normal]
+                    field_2d = dcell * np.sum(field_3d,
+                                              axis=self.norms_gda[self.normal]).T
+                return field_2d, field_3d
+            except Exception as e:
+                print(f"Error reading beta from GDA files: {e}")
+                if self.is_2d:
+                    nh = self.vpic_domain["n" + self.hv[0]]
+                    nv = self.vpic_domain["n" + self.hv[1]]
+                    field_2d = np.zeros((nh, nv))
+                else:
+                    nx = self.vpic_domain["nx"]
+                    ny = self.vpic_domain["ny"]
+                    field_2d = np.zeros((nx, ny))
+                return field_2d, field_2d
+
     def electron_mixing_fraction(self, tindex):
         """get the electron mixing fraction
 
@@ -1714,6 +1803,8 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if self.diag_plot:
             if self.diag_var_name == "jdotE":
                 self.field_2d, self.field_3d = self.get_jdote(tindex)
+            elif self.diag_var_name == "beta":
+                self.field_2d, self.field_3d = self.get_beta(tindex)
             elif self.diag_var_name == "emix":
                 self.field_2d, self.field_3d = self.electron_mixing_fraction(
                     tindex)

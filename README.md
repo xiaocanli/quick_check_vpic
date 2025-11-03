@@ -5,12 +5,15 @@ Interactive visualization tool for VPIC (Vector Particle-In-Cell) simulation dat
 ## Features
 
 - **Interactive 2D/3D visualization** of electromagnetic fields, particle hydro quantities, and diagnostics
+- **Diagnostic plots**: j.E (energy dissipation), beta production (hybridVPIC), turbulence mixing
 - **Multiple plot types**: Contours, 1D slices, averages
 - **Animation** support for time series
 - **Tracer particle** visualization with energy evolution
 - **Flexible configuration** via YAML files or command-line arguments
 - **Auto-detection** of data format, file structure, and particle species
 - **Multi-species support**: Automatically detects ion species from hydro files (ideal for hybridVPIC)
+
+![Quick Check VPIC Screenshot](screenshot.jpg)
 
 ## Installation
 
@@ -232,6 +235,18 @@ The main window provides:
 - **Integrate**: Integrate along normal direction
 - **Fix colormap/colorbar**: Lock color scheme and range
 
+### Diagnostic Plots
+
+Select diagnostic plots from the **Diagnostic plot** dropdown. Available diagnostics:
+
+- **jdotE**: Energy dissipation (j·E). Shows where electromagnetic energy is converted to particle energy. Available for all simulations.
+
+- **beta**: Beta production diagnostics. Shows heating rate due to perpendicular and parallel pressure anisotropies in collisionless plasmas. Particularly useful for hybridVPIC simulations analyzing ion heating mechanisms. Requires `hydro-int-hdf5` directory with `hydro_beta_*.h5` files.
+
+- **emix**: Electron mixing fraction (for turbulence mixing simulations only). Shows `(ne_bot - ne_top) / (ne_bot + ne_top)`.
+
+If beta files are not found, the tool will display a warning message and show a zero field.
+
 ### Tracer Particles
 
 Tracer trajectories are assumed to be in HDF5 format with each tracer in an individual group.
@@ -451,6 +466,7 @@ Please submit issues on GitHub or contact the maintainer:
 
 - **v2.2**:
   - **Dynamic species detection**: Automatically detects particle species from hydro files
+  - **Beta production diagnostics**: Added beta heating diagnostics for hybridVPIC simulations
   - Reads field and hydro variables dynamically from HDF5 files instead of hardcoding
   - Full support for hybridVPIC with multiple ion species (ion-only simulations)
   - Added `auto_detect_species` and `species_list` configuration options
