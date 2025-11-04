@@ -960,6 +960,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         # read the field data
         self.read_data(self.var_name, self.tindex)
 
+        # Enable overplot for the default variable
+        self.overplot_comboBox.setDisabled(False)
+
         # plot button
         self.plotButton.clicked.connect(self.update_plot)
 
