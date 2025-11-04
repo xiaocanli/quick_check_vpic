@@ -2083,6 +2083,9 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.plot_field_line()
         if self.tracer_plot:
             self.plot_tracer()
+        # Set xlim and ylim after overplotting to avoid blank regions near boundary
+        self.canvas.ax_main.set_xlim([hmin, hmax])
+        self.canvas.ax_main.set_ylim([vmin, vmax])
         self.canvas.ax_cbar.clear()
         self.canvas.fig.colorbar(im,
                                  cax=self.canvas.ax_cbar,
