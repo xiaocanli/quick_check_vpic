@@ -9,7 +9,7 @@ data:
   dir_smooth_data: "data_smooth"  # Directory name for smoothed data
   dir_fields_hdf5: "fields_hdf5"  # Field directory name: "field_hdf5" (old) or "fields_hdf5" (new)
   dir_beta_hdf5: "hydro-int-hdf5" # Beta diagnostics directory name (for hybridVPIC beta production data)
-  hdf5_data_order: "xyz"     # HDF5 data organization: "xyz" (older VPIC) or "zyx" (newer VPIC)
+  hdf5_data_order: "zyx"     # HDF5 data organization: "xyz" (older VPIC) or "zyx" (newer VPIC)
   momentum_field: true       # Whether momentum and kinetic energy data are dumped
   time_averaged_field: false # Whether it is time-averaged field
   turbulence_mixing: false   # Whether it has turbulence mixing diagnostics
@@ -21,7 +21,7 @@ data:
 # Time parameters
 time:
   tmin: 0                    # Minimum time frame
-  tmax: 125                  # Maximum time frame
+  tmax: 406                  # Maximum time frame
   animation_tinterval: 100   # Animation interval in milliseconds
 
 # Tracer particle settings

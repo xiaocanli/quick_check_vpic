@@ -1235,6 +1235,18 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if self.plane_index == self.vpic_domain["n" + self.normal]:
             self.plane_index = self.vpic_domain["n" + self.normal] - 1
 
+    def _to_hv_order(self, arr2d):
+        """Return a 2D HDF5 slice in (h, v) order regardless of hdf5_data_order.
+
+        For "xyz" storage (nx, ny, nz) the leftover axes after slicing along
+        ``self.normal`` are already in (h, v) order. For "zyx" storage
+        (nz, ny, nx) they are in (v, h) order, so a transpose is required to
+        match the convention used by ``read_gda_file`` and ``update_plot``.
+        """
+        if config.hdf5_data_order == "zyx":
+            return arr2d.T
+        return arr2d
+
     def plane_hScrollBar_disconnect(self):
         self.sender().valueChanged.disconnect()
 
@@ -1547,7 +1559,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         field_2d = dset[:, self.plane_index, :]
                     else:  # axis_idx == 2
                         field_2d = dset[:, :, self.plane_index]
-        return field_2d
+        return self._to_hv_order(field_2d)
 
     def read_current_density_species(self, vname, tindex, species):
         """Read current density associated with one species
@@ -1584,6 +1596,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     jsp["jdir"] = dset[:, self.plane_index, :]
                 else:  # axis_idx == 2
                     jsp["jdir"] = dset[:, :, self.plane_index]
+                jsp["jdir"] = self._to_hv_order(jsp["jdir"])
         return jsp
 
     def read_current_density(self, vname, tindex):
@@ -1621,6 +1634,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             dcell = self.vpic_domain["d" + self.normal]
             field_2d = np.sum(jsp["jdir"],
                               axis=self.norms_hdf5[self.normal]) * dcell
+            field_2d = self._to_hv_order(field_2d)
         else:
             field_2d = jsp["jdir"]
 
@@ -1699,6 +1713,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                             hydro[key] = dset[:, self.plane_index, :]
                         else:  # axis_idx == 2
                             hydro[key] = dset[:, :, self.plane_index]
+                        hydro[key] = self._to_hv_order(hydro[key])
 
         return hydro
 
@@ -1742,7 +1757,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 else:  # axis_idx == 2
                     field_2d = dset[:, :, self.plane_index]
 
-        return field_2d
+        return self._to_hv_order(field_2d)
 
     def get_jdote_species(self, tindex, species):
         """Get j.E for a specific species
@@ -1763,9 +1778,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             # Handle integration along normal direction
             if self.integrate_normal:
                 dcell = self.vpic_domain["d" + self.normal]
-                jx = np.sum(jx_sp["jdir"], axis=self.norms_hdf5[self.normal]) * dcell
-                jy = np.sum(jy_sp["jdir"], axis=self.norms_hdf5[self.normal]) * dcell
-                jz = np.sum(jz_sp["jdir"], axis=self.norms_hdf5[self.normal]) * dcell
+                jx = self._to_hv_order(
+                    np.sum(jx_sp["jdir"], axis=self.norms_hdf5[self.normal])) * dcell
+                jy = self._to_hv_order(
+                    np.sum(jy_sp["jdir"], axis=self.norms_hdf5[self.normal])) * dcell
+                jz = self._to_hv_order(
+                    np.sum(jz_sp["jdir"], axis=self.norms_hdf5[self.normal])) * dcell
             else:
                 jx = jx_sp["jdir"]
                 jy = jy_sp["jdir"]
@@ -1824,22 +1842,15 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                         field_2d = dcell * np.sum(dset[:, :, :],
                                                   axis=self.norms_hdf5[self.normal])
                     else:
-                        if config.hdf5_data_order == "zyx":
-                            # Newer VPIC format (nz, ny, nx)
-                            if self.normal == 'x':
-                                field_2d = dset[:, :, self.plane_index]
-                            elif self.normal == 'y':
-                                field_2d = dset[:, self.plane_index, :]
-                            else:
-                                field_2d = dset[self.plane_index, :, :]
-                        else:
-                            # Older VPIC format (nx, ny, nz)
-                            if self.normal == 'x':
-                                field_2d = dset[self.plane_index, :, :]
-                            elif self.normal == 'y':
-                                field_2d = dset[:, self.plane_index, :]
-                            else:
-                                field_2d = dset[:, :, self.plane_index]
+                        # Slice based on data order (norms_hdf5 maps direction to axis)
+                        axis_idx = self.norms_hdf5[self.normal]
+                        if axis_idx == 0:
+                            field_2d = dset[self.plane_index, :, :]
+                        elif axis_idx == 1:
+                            field_2d = dset[:, self.plane_index, :]
+                        else:  # axis_idx == 2
+                            field_2d = dset[:, :, self.plane_index]
+                    field_2d = self._to_hv_order(field_2d)
                 return field_2d, field_2d
             except FileNotFoundError:
                 print(f"Warning: Beta diagnostics file not found: {fname}")
@@ -1967,15 +1978,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                     continue
                 art.remove()
 
-        # Handle transpose based on data order
-        # For "zyx" order: data is already in correct shape (ny, nx) for streamplot
-        # For "xyz" order: data needs transpose from (nx, ny) to (ny, nx)
-        if config.hdf5_data_order == "zyx":
-            bh_plot = self.bh_2d
-            bv_plot = self.bv_2d
-        else:
-            bh_plot = self.bh_2d.T
-            bv_plot = self.bv_2d.T
+        # bh_2d / bv_2d are stored in (h, v) order (matching read_gda_file and
+        # the HDF5 readers normalized via _to_hv_order); streamplot expects
+        # shape (Y=v, X=h), so always transpose.
+        bh_plot = self.bh_2d.T
+        bv_plot = self.bv_2d.T
 
         # Create grids that match the actual data dimensions
         # This handles cases where data has been smoothed or processed
