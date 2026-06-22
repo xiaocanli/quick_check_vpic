@@ -20,8 +20,8 @@ data:
 
 # Time parameters
 time:
-  tmin: 0                    # Minimum time frame
-  tmax: 406                  # Maximum time frame
+  tmin: 1                    # Minimum time frame
+  tmax: 100                  # Maximum time frame
   animation_tinterval: 100   # Animation interval in milliseconds
 
 # Tracer particle settings

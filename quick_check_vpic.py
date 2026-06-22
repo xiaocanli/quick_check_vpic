@@ -1266,21 +1266,44 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         if self.auto_update:
             self.update_plot()
 
+    def _first_frame(self, fdir_base):
+        """Return the smallest tindex N for which fdir_base/T.N exists.
+
+        Time-averaged outputs (fields-avg-hdf5, hydro-avg-hdf5) do not contain
+        a T.0 frame, so the variable/species detection cannot assume frame 0
+        exists. Returns None if the directory has no T.<n> subdirectories.
+        """
+        base = Path(fdir_base)
+        if not base.exists():
+            return None
+        frames = []
+        for d in base.glob("T.*"):
+            try:
+                frames.append(int(d.name.split(".")[1]))
+            except (IndexError, ValueError):
+                continue
+        return min(frames) if frames else None
+
     def raw_plot_variables(self):
         if config.hdf5_fields:
             # Read fields from HDF5 file dynamically
             if config.smoothed_data:
                 fdir = "../" + config.dir_smooth_data + "/"
+                ref = 0
             else:
                 if config.time_averaged_field:
-                    fdir = "../fields-avg-hdf5/T.0/"
+                    fdir_base = "../fields-avg-hdf5"
                 else:
-                    fdir = "../" + config.dir_fields_hdf5 + "/T.0/"
-            fname = fdir + "fields_0.h5"
+                    fdir_base = "../" + config.dir_fields_hdf5
+                ref = self._first_frame(fdir_base)
+                if ref is None:
+                    ref = 0
+                fdir = fdir_base + "/T." + str(ref) + "/"
+            fname = fdir + "fields_" + str(ref) + ".h5"
 
             try:
                 with h5py.File(fname, "r") as fh:
-                    group = fh["Timestep_0"]
+                    group = fh["Timestep_" + str(ref)]
                     self.fields_list = list(group.keys())
                 self.fields_list.append("absb")  # Computed field
             except Exception as e:
@@ -1291,11 +1314,16 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             # Detect species and read hydro data
             if config.smoothed_data:
                 hydro_dir = "../" + config.dir_smooth_data + "/"
+                hydro_ref = 0
             else:
                 if config.time_averaged_field:
-                    hydro_dir = "../hydro-avg-hdf5/T.0/"
+                    hydro_base = "../hydro-avg-hdf5"
                 else:
-                    hydro_dir = "../hydro_hdf5/T.0/"
+                    hydro_base = "../hydro_hdf5"
+                hydro_ref = self._first_frame(hydro_base)
+                if hydro_ref is None:
+                    hydro_ref = 0
+                hydro_dir = hydro_base + "/T." + str(hydro_ref) + "/"
 
             self.hydro_list = []
             self.ehydro_list = []  # Electron hydro variables
@@ -1306,11 +1334,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 if os.path.exists(hydro_dir):
                     try:
                         files = os.listdir(hydro_dir)
-                        # Look for hydro_<species>_0.h5 files
+                        # Look for hydro_<species>_<ref>.h5 files
+                        suffix = "_" + str(hydro_ref) + ".h5"
                         for fname in files:
-                            if fname.startswith("hydro_") and fname.endswith("_0.h5"):
+                            if fname.startswith("hydro_") and fname.endswith(suffix):
                                 # Extract species name
-                                species = fname.replace("hydro_", "").replace("_0.h5", "")
+                                species = fname.replace("hydro_", "").replace(suffix, "")
                                 detected_species.append(species)
                         detected_species = sorted(set(detected_species))
                         if detected_species:
@@ -1331,10 +1360,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
             # Read variables from each species' hydro file
             for species in detected_species:
-                fname = hydro_dir + f"hydro_{species}_0.h5"
+                fname = hydro_dir + f"hydro_{species}_{hydro_ref}.h5"
                 try:
                     with h5py.File(fname, "r") as fh:
-                        group = fh["Timestep_0"]
+                        group = fh["Timestep_" + str(hydro_ref)]
                         for var in group.keys():
                             var_name = species + "-" + var
                             self.hydro_list.append(var_name)
